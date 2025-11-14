@@ -1,0 +1,27 @@
+{
+  "name": "neosapien",
+  "version": "1.0.0",
+  "description": "Your Second Brain",
+  "keywords": [
+    "electron",
+    "second-brain",
+    "note-taking",
+    "productivity",
+    "ai"
+  ],
+  "author": "NeoSapien Team <support@neosapien.xyz>",
+  "license": "MIT",
+  "homepage": "https://neosapien.xyz",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NeoSapien/desktop-app.git"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^27.0.0"
+  }
+}
