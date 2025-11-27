@@ -29,7 +29,6 @@ export interface MemoryRecord {
   started_at?: string;
   finished_at?: string;
   duration?: number;
-  status?: string;
   domain?: string;
   is_post_processed?: boolean;
   tasks_count?: number;

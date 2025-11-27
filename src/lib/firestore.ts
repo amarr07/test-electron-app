@@ -1,10 +1,12 @@
 import {
   collection,
+  deleteDoc,
   doc,
   limit as firestoreLimit,
   getDoc,
   getDocs,
   getFirestore,
+  onSnapshot,
   orderBy,
   query,
   setDoc,
@@ -159,6 +161,72 @@ export async function updateUserProfile(
       throw error;
     }
   }
+}
+
+export interface UserEventRecord {
+  id: string;
+  event: string;
+  memoryId?: string;
+  updatedAt: Date;
+  autoOta?: boolean;
+}
+
+/**
+ * Subscribes to Firestore events collection for the current user.
+ * Invokes callback with newly added events ordered by updatedAt ascending.
+ */
+export function subscribeToUserEvents(
+  uid: string,
+  onEvents: (events: UserEventRecord[]) => void,
+): () => void {
+  const db = getFirestoreInstance();
+  if (!db) {
+    return () => {};
+  }
+
+  const eventsRef = collection(db, USERS_COLLECTION, uid, "events");
+  const eventsQuery = query(eventsRef, orderBy("updated_at", "asc"));
+
+  const unsubscribe = onSnapshot(eventsQuery, (snapshot) => {
+    const pendingEvents: UserEventRecord[] = [];
+
+    snapshot
+      .docChanges()
+      .filter((change) => change.type === "added")
+      .forEach((change) => {
+        const data = change.doc.data();
+        if (!data?.event) {
+          return;
+        }
+
+        const updatedAtValue = data.updated_at;
+        const updatedAt =
+          updatedAtValue instanceof Timestamp
+            ? updatedAtValue.toDate()
+            : new Date();
+
+        pendingEvents.push({
+          id: change.doc.id,
+          event: String(data.event),
+          memoryId: data.memory_id ? String(data.memory_id) : undefined,
+          updatedAt,
+          autoOta: Boolean(data.auto_ota),
+        });
+
+        void deleteDoc(change.doc.ref).catch(() => {
+          // Ignore failures; backend cleanup will handle eventual deletion.
+        });
+      });
+
+    if (pendingEvents.length > 0) {
+      pendingEvents.sort(
+        (a, b) => a.updatedAt.getTime() - b.updatedAt.getTime(),
+      );
+      onEvents(pendingEvents);
+    }
+  });
+
+  return unsubscribe;
 }
 
 const CHAT_SESSIONS_COLLECTION = "chatSessions";

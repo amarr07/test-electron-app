@@ -84,6 +84,7 @@ export function MemoriesView({
   onMemoryDetailChange,
   memoryToOpen,
   onMemoryOpened,
+  onMergeStateChange,
 }: {
   searchQuery: string;
   searchResults?: MemoryRecord[];
@@ -92,6 +93,7 @@ export function MemoriesView({
   onMemoryDetailChange?: (isOpen: boolean, onClose: () => void) => void;
   memoryToOpen?: string | null;
   onMemoryOpened?: () => void;
+  onMergeStateChange?: (isMerging: boolean) => void;
 }) {
   const { toast } = useToast();
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
@@ -353,6 +355,10 @@ export function MemoriesView({
       loadMemories({ targetPage: 1, cursorOverride: null });
     }
   }, [refreshToken, loadMemories]);
+
+  useEffect(() => {
+    onMergeStateChange?.(mergeLoading);
+  }, [mergeLoading, onMergeStateChange]);
 
   useEffect(() => {
     if (submittedSearchQuery.length > 0) {

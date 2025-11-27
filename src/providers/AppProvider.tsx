@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { AuthProvider } from "./AuthProvider";
 import { ChatProvider } from "./ChatProvider";
+import { EventStatusProvider } from "./EventStatusProvider";
 import { NotificationProvider } from "./NotificationProvider";
 import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./ToastProvider";
@@ -14,9 +15,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <ToastProvider>
       <NotificationProvider>
         <AuthProvider>
-          <ChatProvider>
-            <ThemeProvider>{children}</ThemeProvider>
-          </ChatProvider>
+          <EventStatusProvider>
+            <ChatProvider>
+              <ThemeProvider>{children}</ThemeProvider>
+            </ChatProvider>
+          </EventStatusProvider>
         </AuthProvider>
       </NotificationProvider>
     </ToastProvider>

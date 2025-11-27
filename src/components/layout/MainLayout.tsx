@@ -2,6 +2,7 @@ import { MemoryRecord } from "@/api/memories";
 import { MemorySearchBar } from "@/components/MemorySearchBar";
 import { RecordingDock } from "@/components/RecordingDock";
 import { SettingsModal } from "@/components/SettingsModal";
+import { StatusPillDescriptor, StatusPills } from "@/components/StatusPills";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { useRecorder } from "@/hooks/useRecorder";
@@ -10,7 +11,8 @@ import { AskNeoSection } from "@/pages/AskNeo";
 import { HomeSection } from "@/pages/Home";
 import { MemoriesView } from "@/pages/Memories";
 import { RemindersSection } from "@/pages/Reminders";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEventStatus } from "@/providers/EventStatusProvider";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Main application layout orchestrator.
@@ -26,10 +28,9 @@ export function MainLayout() {
   const [isHomeRefreshing, setIsHomeRefreshing] = useState(false);
   const [isMemoriesRefreshing, setIsMemoriesRefreshing] = useState(false);
   const [isRemindersRefreshing, setIsRemindersRefreshing] = useState(false);
-  const [dockMessage, setDockMessage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [memoryToOpen, setMemoryToOpen] = useState<string | null>(null);
-  const clearMessageTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [isMergingMemories, setIsMergingMemories] = useState(false);
   const {
     status: recorderStatus,
     start: startRecording,
@@ -37,6 +38,7 @@ export function MainLayout() {
     resume: resumeRecording,
     stop: stopRecording,
   } = useRecorder();
+  const { isTranscribing, isMemoryProcessing } = useEventStatus();
   const { elapsed: dockElapsed, reset: resetDockTimer } = useTimer(
     recorderStatus === "recording",
   );
@@ -59,44 +61,22 @@ export function MainLayout() {
     setIsRemindersRefreshing(loading);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (clearMessageTimeout.current) {
-        clearTimeout(clearMessageTimeout.current);
-      }
-    };
-  }, []);
-
-  const showDockMessage = useCallback((message: string) => {
-    setDockMessage(message);
-    if (clearMessageTimeout.current) {
-      clearTimeout(clearMessageTimeout.current);
-    }
-    clearMessageTimeout.current = setTimeout(() => {
-      setDockMessage(null);
-    }, 3000);
-  }, []);
-
   const handleStart = useCallback(async () => {
-    setDockMessage(null);
     await startRecording();
   }, [startRecording]);
 
   const handlePause = useCallback(async () => {
-    setDockMessage(null);
     await pauseRecording();
   }, [pauseRecording]);
 
   const handleResume = useCallback(async () => {
-    setDockMessage(null);
     await resumeRecording();
   }, [resumeRecording]);
 
   const handleStop = useCallback(async () => {
     await stopRecording();
     resetDockTimer();
-    showDockMessage("Saved to your memories!");
-  }, [resetDockTimer, showDockMessage, stopRecording]);
+  }, [resetDockTimer, stopRecording]);
 
   /**
    * Triggers refresh of a specific section by incrementing refresh counter.
@@ -188,6 +168,50 @@ export function MainLayout() {
     setActiveSection("ask-neo");
   }, []);
 
+  const statusPills = useMemo<StatusPillDescriptor[]>(() => {
+    const pills: StatusPillDescriptor[] = [];
+
+    if (recorderStatus === "recording") {
+      pills.push({
+        key: "recording",
+        label: "Recording",
+        tone: "danger",
+      });
+    } else if (recorderStatus === "paused") {
+      pills.push({
+        key: "recording-paused",
+        label: "Recording paused",
+        tone: "warning",
+      });
+    }
+
+    if (isTranscribing) {
+      pills.push({
+        key: "transcribing",
+        label: "Transcribing",
+        showSpinner: true,
+      });
+    }
+
+    if (isMemoryProcessing) {
+      pills.push({
+        key: "processing",
+        label: "Processing memory",
+        showSpinner: true,
+      });
+    }
+
+    if (isMergingMemories) {
+      pills.push({
+        key: "merging",
+        label: "Merging memories",
+        showSpinner: true,
+      });
+    }
+
+    return pills;
+  }, [recorderStatus, isTranscribing, isMemoryProcessing, isMergingMemories]);
+
   return (
     <>
       <div className="h-full w-full flex bg-background overflow-hidden">
@@ -227,6 +251,7 @@ export function MainLayout() {
             onSelectReminder={handleTopSearchReminderSelect}
             onSelectSession={handleTopSearchSessionSelect}
           />
+          <StatusPills statuses={statusPills} />
 
           <div className="flex-1 flex flex-col bg-background min-h-0">
             <div className="flex-1 overflow-y-auto min-h-0">
@@ -274,6 +299,7 @@ export function MainLayout() {
                     }}
                     memoryToOpen={memoryToOpen}
                     onMemoryOpened={() => setMemoryToOpen(null)}
+                    onMergeStateChange={setIsMergingMemories}
                   />
                 )}
                 {activeSection === "reminders" && (
@@ -289,7 +315,6 @@ export function MainLayout() {
               <RecordingDock
                 status={recorderStatus}
                 elapsed={dockElapsed}
-                message={dockMessage ?? undefined}
                 onStart={handleStart}
                 onPause={handlePause}
                 onResume={handleResume}

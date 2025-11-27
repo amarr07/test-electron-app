@@ -2,6 +2,7 @@ import { config, electronAPI } from "@/lib/electron";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { storage } from "@/lib/storage";
 import {
+  createUserWithEmailAndPassword,
   deleteUser,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signOut as firebaseSignOut,
@@ -14,6 +15,7 @@ import {
   type Auth,
   type User,
 } from "firebase/auth";
+import { Timestamp } from "firebase/firestore";
 
 /**
  * Centralized Firebase Auth manager.
@@ -123,8 +125,18 @@ class AuthManager {
         email.trim(),
         password,
       );
+      await this.ensureUserRecord(credential.user);
       return credential.user;
     } catch (error: any) {
+      if (error?.code === "auth/user-not-found") {
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password,
+        );
+        await this.ensureUserRecord(credential.user);
+        return credential.user;
+      }
       throw this.handleAuthError(error);
     }
   }
@@ -271,6 +283,7 @@ class AuthManager {
       }
 
       const currentUser = userCredential.user;
+      await this.ensureUserRecord(currentUser);
       if (accessToken && (!currentUser.displayName || !currentUser.photoURL)) {
         try {
           const userInfoResponse = await fetch(
@@ -439,6 +452,7 @@ class AuthManager {
         rawNonce: rawNonce,
       });
       const userCredential = await signInWithCredential(auth, credential);
+      await this.ensureUserRecord(userCredential.user);
 
       return userCredential.user;
     } catch (error: any) {
@@ -524,6 +538,35 @@ class AuthManager {
       await firebaseSendPasswordResetEmail(auth, email.trim());
     } catch (error: any) {
       throw this.handleAuthError(error);
+    }
+  }
+
+  /**
+   * Ensures a Firestore user record exists and updates last sign-in timestamp.
+   * Fails silently to avoid blocking authentication if Firestore is unavailable.
+   */
+  private async ensureUserRecord(user: User | null): Promise<void> {
+    if (!user?.uid) return;
+    try {
+      const { upsertUser } = await import("@/lib/firestore");
+      const now = Timestamp.now();
+      const providerId =
+        user.providerData?.find((p) => p.providerId)?.providerId || "password";
+      const displayName =
+        user.displayName?.trim() || user.email?.split("@")[0] || "New user";
+
+      await upsertUser({
+        id: user.uid,
+        name: displayName,
+        email: user.email || "",
+        profile_url: user.photoURL || null,
+        provider: providerId,
+        created_at: now,
+        updated_at: now,
+        last_sign_at: now,
+      });
+    } catch (err) {
+      console.error("Failed to ensure user record:", err);
     }
   }
 

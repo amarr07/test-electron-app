@@ -7,6 +7,7 @@ import {
 import { Loader } from "@/components/ui/loader";
 import type { RecordingState } from "@/hooks/useRecorder";
 import { useTimer } from "@/hooks/useTimer";
+import { storage } from "@/lib/storage";
 import { formatElapsed } from "@/lib/time";
 import { useNotifications } from "@/providers/NotificationProvider";
 import { useToast } from "@/providers/ToastProvider";
@@ -185,8 +186,18 @@ export function CalendarEvents({
 
   /**
    * Loads calendar events and registers them for notifications.
+   * Skips polling entirely when Google Calendar is not connected.
    */
   const loadEvents = useCallback(async () => {
+    const token = await storage.getGoogleAccessToken();
+    if (!token) {
+      setEventsByDate([]);
+      setLoading(false);
+      setError(null);
+      onLoadingChange?.(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     onLoadingChange?.(true);

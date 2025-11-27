@@ -987,54 +987,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       id: "bugs",
       label: "Report a Bug",
       icon: Bug,
+      onClick: () => {
+        window.location.href = "mailto:support@neosapien.xyz";
+      },
       content: (
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Describe what happened and we'll follow up. Screenshots help.
-          </p>
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-[0.25em] text-muted">
-              Summary
-            </label>
-            <div className="rounded-2xl border border-[#d0d0d0] dark:border-[#404040] bg-surface shadow-sm px-4 py-2 focus-within:border-[#0f8b54]">
-              <input
-                type="text"
-                value={bugSummary}
-                onChange={(event) => setBugSummary(event.target.value)}
-                placeholder="Something broke when..."
-                className="w-full border-none bg-transparent text-sm text-foreground placeholder:text-muted focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-[0.25em] text-muted">
-              Details
-            </label>
-            <div className="rounded-2xl border border-[#d0d0d0] dark:border-[#404040] bg-surface shadow-sm px-4 py-2 focus-within:border-[#0f8b54]">
-              <textarea
-                value={bugDetails}
-                onChange={(event) => setBugDetails(event.target.value)}
-                placeholder="Steps to reproduce, expected vs actual behavior..."
-                rows={5}
-                className="w-full resize-none border-none bg-transparent text-sm text-foreground placeholder:text-muted focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleSubmitBug}
-              className="inline-flex items-center justify-center rounded-full bg-[#0f8b54] px-6 py-2 text-sm font-semibold text-white transition hover:bg-[#0d6b42]"
-            >
-              Send report
-            </button>
-            <a
-              href="mailto:support@neosapien.xyz"
-              className="inline-flex items-center justify-center rounded-full border border-border px-6 py-2 text-sm font-semibold text-foreground transition hover:border-[#0f8b54]"
-            >
-              Email support
-            </a>
-          </div>
+        <div className="space-y-2 text-sm text-muted">
+          <p>Opening your email client...</p>
         </div>
       ),
     },
@@ -1077,7 +1035,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <button
                     key={section.id}
                     type="button"
-                    onClick={() => setActiveSection(section.id)}
+                    onClick={() => {
+                      if (section.onClick) {
+                        section.onClick();
+                        return;
+                      }
+                      setActiveSection(section.id);
+                    }}
                     className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition group ${
                       isActive
                         ? "bg-slate-100/80 text-foreground shadow-sm dark:bg-[#1f1f1f]"
