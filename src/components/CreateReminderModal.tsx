@@ -1,6 +1,13 @@
 import { Input } from "@/components/ui/input";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { CalendarPlus, ChevronLeft, ChevronRight, Star, X } from "lucide-react";
+import {
+  CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
+  Link2,
+  Star,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 interface CreateReminderModalProps {
@@ -17,6 +24,7 @@ interface CreateReminderModalProps {
     description?: string;
     important?: boolean;
   };
+  linkedMemoryTitle?: string;
   containerClassName?: string;
 }
 
@@ -28,6 +36,7 @@ export function CreateReminderModal({
   onClose,
   onSave,
   defaultValues,
+  linkedMemoryTitle,
   containerClassName,
 }: CreateReminderModalProps) {
   const [title, setTitle] = useState(defaultValues?.title ?? "");
@@ -166,6 +175,14 @@ export function CreateReminderModal({
                 className="h-9 border-none bg-transparent px-0 text-base font-semibold text-foreground placeholder:text-muted focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </div>
+            {linkedMemoryTitle && (
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-[#0f8b54]/10 px-2.5 py-1 text-xs text-[#0f8b54]">
+                  <Link2 className="h-3 w-3" />
+                  <span className="font-semibold">{linkedMemoryTitle}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="relative flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-surface px-4 py-3 text-sm text-muted">

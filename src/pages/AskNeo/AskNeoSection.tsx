@@ -11,7 +11,7 @@ import {
 import { getMemoriesByIds, MemoryRecord } from "@/api/memories";
 import { MarkdownText } from "@/components/ui/markdown";
 import { useToast } from "@/providers/ToastProvider";
-import { ChevronRight, History, Loader2, Plus, Send, X } from "lucide-react";
+import { ArrowUp, ChevronRight, History, Loader2, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface Message {
@@ -606,7 +606,7 @@ export function AskNeoSection({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
-      <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col min-h-0 overflow-y-auto px-4 sm:px-6 pb-16">
+      <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col min-h-0 overflow-y-auto px-4 sm:px-6 pb-24">
         <div className="flex items-center justify-between mb-1">
           <p className="text-[11px] uppercase tracking-[0.3em] text-muted">
             Ask Neo
@@ -686,7 +686,7 @@ export function AskNeoSection({
                                     })}
                                   </p>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-muted flex-shrink-0" />
+                                <ChevronRight className="h-4 w-4 text-[#0f8b54] flex-shrink-0" />
                               </button>
                             ))}
                           </div>
@@ -738,7 +738,7 @@ export function AskNeoSection({
           ) : (
             <div
               ref={messagesContainerRef}
-              className="flex-1 w-full overflow-y-auto space-y-4 pr-1 pb-16"
+              className="flex-1 w-full overflow-y-auto space-y-4 pr-1 pb-24"
             >
               {messages.map((message) => (
                 <div
@@ -829,8 +829,8 @@ export function AskNeoSection({
         </div>
       </div>
 
-      <div className="w-full max-w-4xl mx-auto sticky bottom-0 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3">
-        <div className="flex items-center gap-2 rounded-3xl border border-[#d0d0d0] dark:border-[#404040] bg-surface px-4 py-2 transition focus-within:border-[#0f8b54] focus-within:shadow-[0_0_0_1px_rgba(15,139,84,0.35)] shadow-sm">
+      <div className="w-full max-w-4xl mx-auto sticky bg-transparent bottom-0 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3">
+        <div className="flex items-center gap-2 rounded-full border border-[#d0d0d0] dark:border-[#404040] bg-surface px-4 py-2 transition focus-within:border-[#0f8b54] focus-within:shadow-[0_0_0_1px_rgba(15,139,84,0.35)] shadow-sm">
           <input
             type="text"
             value={prompt}
@@ -851,7 +851,7 @@ export function AskNeoSection({
             }`}
             aria-label="Send question"
           >
-            <Send
+            <ArrowUp
               className={`h-3.5 w-3.5 ${isStreaming ? "opacity-60" : ""}`}
             />
           </button>

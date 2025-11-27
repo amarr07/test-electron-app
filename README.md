@@ -18,16 +18,24 @@ Configure environment variables in `.env` file.
 
 ## Development
 
-Start development server:
+Start development server (works on Windows/macOS):
 
 ```bash
 npm start
 ```
 
-Build for production:
+### Build for production
+
+#### Windows installer
 
 ```bash
-npm build
+npm run build:win
+```
+
+#### macOS build
+
+```bash
+npm run build:mac
 ```
 
 Format code:

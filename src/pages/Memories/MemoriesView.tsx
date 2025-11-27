@@ -111,7 +111,6 @@ export function MemoriesView({
   );
   const [selectedMemoryFull, setSelectedMemoryFull] =
     useState<MemoryRecord | null>(null);
-  const [loadingMemoryDetails, setLoadingMemoryDetails] = useState(false);
   const [editingMemory, setEditingMemory] = useState<MemoryRecord | null>(null);
   const [shareMemory, setShareMemory] = useState<MemoryRecord | null>(null);
   const [memoryToDelete, setMemoryToDelete] = useState<MemoryRecord | null>(
@@ -154,6 +153,8 @@ export function MemoriesView({
   const latestRequestRef = useRef(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [maxVisitedPage, setMaxVisitedPage] = useState(1);
+  const [searchPage, setSearchPage] = useState(1);
+  const SEARCH_PAGE_SIZE = 10;
   const normalizedSearchQuery = submittedSearchQuery.trim().toLowerCase();
 
   useEffect(() => {
@@ -166,6 +167,27 @@ export function MemoriesView({
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [currentPage]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      const scrollableContainer = document.querySelector(
+        ".flex-1.overflow-y-auto.min-h-0",
+      ) as HTMLElement;
+      if (scrollableContainer) {
+        scrollableContainer.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        const mainContainer = document.querySelector(
+          "[class*='overflow-y-auto']",
+        ) as HTMLElement;
+        if (mainContainer) {
+          mainContainer.scrollTo({ top: 0, behavior: "smooth" });
+        } else {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      }
+    });
+  }, [searchPage]);
+
   const filtersActive =
     filtersApplied &&
     (selectedTopics.length > 0 ||
@@ -304,6 +326,9 @@ export function MemoriesView({
     if (submittedSearchQuery.length > 0 && searchResults.length > 0) {
       setMemories(searchResults);
       setHasMore(false);
+      setCurrentPage(1);
+      setMaxVisitedPage(1);
+      pageCursorsRef.current = [null];
       setLoading(false);
       onLoadingChange?.(false);
     } else if (
@@ -328,6 +353,15 @@ export function MemoriesView({
       loadMemories({ targetPage: 1, cursorOverride: null });
     }
   }, [refreshToken, loadMemories]);
+
+  useEffect(() => {
+    if (submittedSearchQuery.length > 0) {
+      setCurrentPage(1);
+      setMaxVisitedPage(1);
+      setSearchPage(1);
+      pageCursorsRef.current = [null];
+    }
+  }, [submittedSearchQuery]);
 
   useEffect(() => {
     if (!filterMenuOpen) return;
@@ -480,7 +514,6 @@ export function MemoriesView({
 
   useEffect(() => {
     if (selectedMemory) {
-      setLoadingMemoryDetails(true);
       getMemoriesByIds({ memoryIds: [selectedMemory.id], pageSize: 1 })
         .then(({ records }) => {
           const fullMemory = records[0];
@@ -497,9 +530,6 @@ export function MemoriesView({
             variant: "destructive",
           });
           setSelectedMemoryFull(selectedMemory);
-        })
-        .finally(() => {
-          setLoadingMemoryDetails(false);
         });
     } else {
       setSelectedMemoryFull(null);
@@ -626,13 +656,17 @@ export function MemoriesView({
 
   const filteredMemories = useMemo(() => {
     if (submittedSearchQuery.length > 0 && searchResults.length > 0) {
-      return searchResults;
+      const startIndex = (searchPage - 1) * SEARCH_PAGE_SIZE;
+      const endIndex = startIndex + SEARCH_PAGE_SIZE;
+      return searchResults.slice(startIndex, endIndex);
     }
     if (filtersActive) {
       return memories;
     }
     if (submittedSearchQuery.length > 0) {
-      return searchResults;
+      const startIndex = (searchPage - 1) * SEARCH_PAGE_SIZE;
+      const endIndex = startIndex + SEARCH_PAGE_SIZE;
+      return searchResults.slice(startIndex, endIndex);
     }
     return memories.filter((memory) => {
       const haystacks = [
@@ -657,6 +691,8 @@ export function MemoriesView({
     normalizedSearchQuery,
     submittedSearchQuery,
     searchResults,
+    searchPage,
+    SEARCH_PAGE_SIZE,
   ]);
 
   const groupedMemories = useMemo(() => {
@@ -688,6 +724,12 @@ export function MemoriesView({
     !loading && memories.length > 0 && filteredMemories.length === 0;
   const hasSearchResults =
     submittedSearchQuery.length > 0 && filteredMemories.length > 0;
+  const isSearchMode = submittedSearchQuery.trim().length > 0;
+  const totalSearchPages = Math.ceil(searchResults.length / SEARCH_PAGE_SIZE);
+  const shouldShowPagination =
+    !isSearchMode && (hasMore || maxVisitedPage > 1 || currentPage > 1);
+  const shouldShowSearchPagination =
+    isSearchMode && searchResults.length > SEARCH_PAGE_SIZE;
   const contentSpacing = hasSearchResults ? "space-y-3" : "space-y-6";
 
   if (loading && memories.length === 0) {
@@ -782,77 +824,41 @@ export function MemoriesView({
     return (
       <>
         <SectionShell>
-          {loadingMemoryDetails ? (
-            <div className="flex items-center justify-center min-h-[400px]">
-              <Loader2 className="h-6 w-6 animate-spin text-muted" />
-            </div>
-          ) : selectedMemoryFull ? (
-            <MemoryDetailView
-              memory={selectedMemoryFull}
-              onEdit={(memory) => {
-                setEditingMemory(memory);
-              }}
-              availableTopics={availableTopics}
-              availableParticipants={availableParticipants}
-              onMemoryUpdate={(updatedMemory) => {
+          <MemoryDetailView
+            memory={selectedMemoryFull || selectedMemory}
+            onEdit={(memory) => {
+              setEditingMemory(memory);
+            }}
+            availableTopics={availableTopics}
+            availableParticipants={availableParticipants}
+            onMemoryUpdate={(updatedMemory) => {
+              if (selectedMemoryFull) {
                 setSelectedMemoryFull(updatedMemory);
-                setMemories((prev) =>
-                  prev.map((record) =>
-                    record.id === updatedMemory.id ? updatedMemory : record,
-                  ),
-                );
-              }}
-              onOpenMemory={(memoryId) => {
-                getMemoriesByIds({ memoryIds: [memoryId], pageSize: 1 })
-                  .then(({ records }) => {
-                    const memory = records[0];
-                    if (memory) {
-                      setSelectedMemory(memory);
-                    }
-                  })
-                  .catch((error: any) => {
-                    toast({
-                      title: "Unable to open memory",
-                      description: error?.message || "Try again.",
-                      variant: "destructive",
-                    });
+              }
+              setSelectedMemory(updatedMemory);
+              setMemories((prev) =>
+                prev.map((record) =>
+                  record.id === updatedMemory.id ? updatedMemory : record,
+                ),
+              );
+            }}
+            onOpenMemory={(memoryId) => {
+              getMemoriesByIds({ memoryIds: [memoryId], pageSize: 1 })
+                .then(({ records }) => {
+                  const memory = records[0];
+                  if (memory) {
+                    setSelectedMemory(memory);
+                  }
+                })
+                .catch((error: any) => {
+                  toast({
+                    title: "Unable to open memory",
+                    description: error?.message || "Try again.",
+                    variant: "destructive",
                   });
-              }}
-            />
-          ) : (
-            <MemoryDetailView
-              memory={selectedMemory}
-              onEdit={(memory) => {
-                setEditingMemory(memory);
-              }}
-              availableTopics={availableTopics}
-              availableParticipants={availableParticipants}
-              onMemoryUpdate={(updatedMemory) => {
-                setSelectedMemory(updatedMemory);
-                setMemories((prev) =>
-                  prev.map((record) =>
-                    record.id === updatedMemory.id ? updatedMemory : record,
-                  ),
-                );
-              }}
-              onOpenMemory={(memoryId) => {
-                getMemoriesByIds({ memoryIds: [memoryId], pageSize: 1 })
-                  .then(({ records }) => {
-                    const memory = records[0];
-                    if (memory) {
-                      setSelectedMemory(memory);
-                    }
-                  })
-                  .catch((error: any) => {
-                    toast({
-                      title: "Unable to open memory",
-                      description: error?.message || "Try again.",
-                      variant: "destructive",
-                    });
-                  });
-              }}
-            />
-          )}
+                });
+            }}
+          />
         </SectionShell>
         {editingMemory && (
           <EditNotesModal
@@ -1454,14 +1460,14 @@ export function MemoriesView({
           </div>
           {hasSearchResults && (
             <div className="flex items-center rounded-2xl border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground/90">
-              {filteredMemories.length}{" "}
-              {filteredMemories.length === 1 ? "Memory" : "Memories"} found
+              {searchResults.length}{" "}
+              {searchResults.length === 1 ? "Memory" : "Memories"} found
             </div>
           )}
           {groupedMemories.map((group, index) => (
             <div
               key={group.key}
-              className={`space-y-3 ${index > 0 ? "pt-6" : ""}`}
+              className={`space-y-3 ${selectionMode && selectedIds.length > 0 ? "pb-24" : ""} ${index > 0 ? "pt-6" : ""}`}
             >
               {(() => {
                 const groupIds = group.items.map((item) => item.id);
@@ -1470,7 +1476,6 @@ export function MemoriesView({
                 ).length;
                 const allSelected =
                   selectedCount === groupIds.length && groupIds.length > 0;
-                const partiallySelected = selectedCount > 0 && !allSelected;
 
                 if (submittedSearchQuery.length > 0) {
                   return null;
@@ -1523,22 +1528,25 @@ export function MemoriesView({
               </div>
             </div>
           ))}
-          <div className="flex items-center justify-center pb-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (currentPage > 1) {
-                    loadMemories({ targetPage: currentPage - 1 });
-                  }
-                }}
-                disabled={currentPage === 1 || loading}
-                className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
-              >
-                Previous
-              </button>
-              {Array.from({ length: maxVisitedPage }, (_, idx) => idx + 1).map(
-                (page) => (
+          {shouldShowPagination && (
+            <div className="flex items-center justify-center pb-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentPage > 1) {
+                      loadMemories({ targetPage: currentPage - 1 });
+                    }
+                  }}
+                  disabled={currentPage === 1 || loading}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                {Array.from(
+                  { length: maxVisitedPage },
+                  (_, idx) => idx + 1,
+                ).map((page) => (
                   <button
                     key={page}
                     type="button"
@@ -1554,22 +1562,59 @@ export function MemoriesView({
                   >
                     {page}
                   </button>
-                ),
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (hasMore) {
-                    loadMemories({ targetPage: currentPage + 1 });
-                  }
-                }}
-                disabled={!hasMore || loading}
-                className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
-              >
-                Next
-              </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (hasMore) {
+                      loadMemories({ targetPage: currentPage + 1 });
+                    }
+                  }}
+                  disabled={!hasMore || loading}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+          {shouldShowSearchPagination && (
+            <div className="flex items-center justify-center pb-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (searchPage > 1) {
+                      setSearchPage(searchPage - 1);
+                    }
+                  }}
+                  disabled={searchPage === 1}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  className="min-w-[36px] rounded-full px-3 py-1 text-xs font-semibold bg-[#0f8b54] text-white shadow-[0_8px_18px_rgba(0,0,0,0.22)]"
+                >
+                  {searchPage}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (searchPage < totalSearchPages) {
+                      setSearchPage(searchPage + 1);
+                    }
+                  }}
+                  disabled={searchPage >= totalSearchPages}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       {selectionMode && selectedIds.length > 0 && (
@@ -1778,10 +1823,14 @@ function MemoryCard({
             </span>
           )}
           {matchedParticipant && (
-            <span className="inline-flex items-center rounded-full bg-[#5F4396]/20 px-2 py-0.5 text-xs text-[#5F4396]">
-              {highlightQuery
-                ? highlightText(matchedParticipant, highlightQuery)
-                : matchedParticipant}
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${
+                highlightQuery
+                  ? "bg-[#5F4396] text-white border border-[#5F4396] shadow-sm"
+                  : "bg-[#5F4396]/20 text-[#5F4396]"
+              }`}
+            >
+              {matchedParticipant}
             </span>
           )}
         </div>
@@ -1814,7 +1863,6 @@ function MemoryDetailView({
   );
   const { toast } = useToast();
   const [memoryReminders, setMemoryReminders] = useState<Task[]>([]);
-  const [remindersLoading, setRemindersLoading] = useState(false);
   const [remindersInitialized, setRemindersInitialized] = useState(false);
   const [createReminderModalOpen, setCreateReminderModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Task | null>(null);
@@ -1847,7 +1895,6 @@ function MemoryDetailView({
     "flex-shrink-0 min-w-[220px] max-w-xs rounded-2xl border border-[#d0d0d0] dark:border-[#404040] bg-surface px-3.5 py-3 text-left text-sm font-medium text-foreground shadow-sm transition hover:border-[#0f8b54] focus:outline-none whitespace-normal break-words";
 
   const loadMemoryReminders = useCallback(async () => {
-    setRemindersLoading(true);
     try {
       const { groupedTasks, nonMemoryTasks } = await getTasks();
       const linked: Task[] = [];
@@ -1901,20 +1948,14 @@ function MemoryDetailView({
         description: error?.message || "Try again.",
         variant: "destructive",
       });
-    } finally {
-      setRemindersLoading(false);
     }
   }, [memory.id, toast]);
 
   useEffect(() => {
-    if (
-      activeTab === "reminders" &&
-      !remindersInitialized &&
-      !remindersLoading
-    ) {
+    if (activeTab === "reminders" && !remindersInitialized) {
       loadMemoryReminders();
     }
-  }, [activeTab, remindersInitialized, remindersLoading, loadMemoryReminders]);
+  }, [activeTab, remindersInitialized, loadMemoryReminders]);
 
   const handleCreateLinkedReminder = async (reminder: {
     title: string;
@@ -2475,9 +2516,9 @@ function MemoryDetailView({
   };
 
   const handleCopyMoM = () => {
-    const momText =
-      localMemory.mom?.trim() || localMemory.summary?.trim() || "";
-    if (!momText) {
+    const signature = "\n\nCreated by Neo AI\nhttps://neosapien.xyz";
+    const momContent = getMoMContent();
+    if (!momContent) {
       toast({
         title: "No content available",
         description: "There is nothing to copy.",
@@ -2485,7 +2526,12 @@ function MemoryDetailView({
       });
       return;
     }
-    navigator.clipboard.writeText(momText);
+    const titleSection = localMemory.title
+      ? `${localMemory.title.trim()}\n\n`
+      : "";
+    const plainText = stripMarkdownToPlainText(momContent);
+    const textContent = `${titleSection}${plainText}`.trim();
+    navigator.clipboard.writeText(`${textContent}${signature}`);
     toast({
       title: "Copied to clipboard",
       description: "Content ready to share.",
@@ -2497,6 +2543,7 @@ function MemoryDetailView({
   };
 
   const handleCopyMarkdownMoM = async () => {
+    const signature = "\n\nCreated by Neo AI\nhttps://neosapien.xyz";
     const markdown = formatMoMAsMarkdown();
     if (!markdown) {
       toast({
@@ -2508,7 +2555,7 @@ function MemoryDetailView({
     }
 
     try {
-      await navigator.clipboard.writeText(markdown);
+      await navigator.clipboard.writeText(`${markdown}${signature}`);
       toast({
         title: "Markdown copied",
         description: "Summary copied with formatting.",
@@ -2603,7 +2650,15 @@ function MemoryDetailView({
         handleShareMoM();
         break;
       case "share_reminders":
-        handleShareReminders();
+        if (activeTab !== "reminders") {
+          setActiveTab("reminders");
+          setTimeout(() => {
+            setShareRemindersMenuOpen(true);
+          }, 100);
+        } else {
+          handleShareReminders();
+        }
+        setMenuOpen(false);
         break;
     }
   };
@@ -2628,17 +2683,17 @@ function MemoryDetailView({
 
   const stripMarkdownToPlainText = (markdown: string) =>
     markdown
-      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/```[\s\S]*?```/g, "")
       .replace(/\*\*(.*?)\*\*/g, "$1")
       .replace(/__(.*?)__/g, "$1")
+      .replace(/\*(.*?)\*/g, "$1")
+      .replace(/_(.*?)_/g, "$1")
       .replace(/`([^`]*)`/g, "$1")
       .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-      .replace(/\[[^\]]*\]\(([^)]*)\)/g, "$1")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
       .replace(/^>+\s?/gm, "")
-      .replace(/^\s*[-*+]\s+/gm, "")
-      .replace(/#+\s?/g, "")
-      .replace(/\r?\n+/g, " ")
-      .replace(/\s{2,}/g, " ")
+      .replace(/^#+\s+/gm, "")
+      .replace(/^\s*[-*+]\s+/gm, "• ")
       .trim();
 
   const truncateForX = (text: string, limit = 280) => {
@@ -2649,54 +2704,68 @@ function MemoryDetailView({
   const formatRemindersAsText = (tasks: Task[]) => {
     if (tasks.length === 0) return "No reminders to share.";
 
-    const grouped = tasks.reduce(
-      (acc, task) => {
-        const taskDate = task.due_date
-          ? new Date(task.due_date).toLocaleDateString("en-US", {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            })
-          : "No date";
-        if (!acc[taskDate]) acc[taskDate] = [];
-        acc[taskDate].push(task);
-        return acc;
-      },
-      {} as Record<string, Task[]>,
-    );
+    const pendingTasks = tasks.filter((task) => task.status !== "completed");
+    const completedTasks = tasks.filter((task) => task.status === "completed");
 
-    let text = `📋 Reminders for "${localMemory.title || "Memory"}"\n\n`;
-    Object.entries(grouped).forEach(([date, dateTasks]) => {
-      text += `${date}\n`;
-      dateTasks.forEach((task) => {
-        const status = task.status === "completed" ? "✓" : "○";
-        const important = task.important ? " ⭐" : "";
-        text += `  ${status} ${task.task_name}${important}\n`;
-        if (task.details) {
-          text += `    ${task.details}\n`;
-        }
+    let text = "My Reminders\n\n";
+
+    if (pendingTasks.length > 0) {
+      text += "Pending Reminders\n\n";
+      pendingTasks.forEach((task, index) => {
+        text += `${index + 1}. ${task.task_name}\n`;
       });
       text += "\n";
+    }
+
+    if (completedTasks.length > 0) {
+      text += "Completed Reminders\n\n";
+      completedTasks.forEach((task, index) => {
+        text += `${index + 1}. ${task.task_name}\n`;
+      });
+      text += "\n";
+    }
+
+    text += "Summary\n\n";
+    text += `Total: ${tasks.length} reminder${tasks.length !== 1 ? "s" : ""}\n`;
+    text += `Pending: ${pendingTasks.length}\n`;
+    if (completedTasks.length > 0) {
+      text += `Completed: ${completedTasks.length}\n`;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
-    return text.trim();
+    const timeStr = now.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    text += `\nGenerated on ${dateStr} at ${timeStr}`;
+
+    return text;
   };
 
   const formatRemindersAsCSV = (tasks: Task[]) => {
     if (tasks.length === 0)
-      return "Task Name,Status,Important,Due Date,Details\n";
+      return "CONTENT,DESCRIPTION,DATE,DEADLINE,IMPORTANT\n";
 
-    const headers = "Task Name,Status,Important,Due Date,Details\n";
+    const headers = "CONTENT,DESCRIPTION,DATE,DEADLINE,IMPORTANT\n";
     const rows = tasks.map((task) => {
-      const name = `"${task.task_name.replace(/"/g, '""')}"`;
-      const status = task.status;
-      const important = task.important ? "Yes" : "No";
-      const dueDate = task.due_date
-        ? new Date(task.due_date).toLocaleDateString("en-US")
-        : "";
-      const details = task.details
+      const content = `"${task.task_name.replace(/"/g, '""')}"`;
+      const description = task.details
         ? `"${task.details.replace(/"/g, '""')}"`
         : "";
-      return `${name},${status},${important},${dueDate},${details}`;
+      const date = task.created_at
+        ? new Date(task.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "";
+      const deadline = task.due_date
+        ? new Date(task.due_date).toISOString().replace("T", " ").slice(0, 19)
+        : "";
+      const important = task.important ? "Yes" : "No";
+      return `${content},${description},${date},${deadline},${important}`;
     });
     return headers + rows.join("\n");
   };
@@ -2856,11 +2925,22 @@ function MemoryDetailView({
   };
 
   const handleWhatsAppShareMoM = () => {
-    const momText =
-      localMemory.mom?.trim() ||
-      localMemory.summary?.trim() ||
-      "No content available.";
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(momText)}`;
+    const signature = "\n\nCreated by Neo AI\nhttps://neosapien.xyz";
+    const momContent = getMoMContent();
+    if (!momContent) {
+      toast({
+        title: "No content available",
+        description: "There is nothing to share.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const titleSection = localMemory.title
+      ? `${localMemory.title.trim()}\n\n`
+      : "";
+    const plainText = stripMarkdownToPlainText(momContent);
+    const textContent = `${titleSection}${plainText}${signature}`.trim();
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(textContent)}`;
     window.open(whatsappUrl, "_blank");
     toast({
       title: "Opening WhatsApp",
@@ -2870,12 +2950,23 @@ function MemoryDetailView({
   };
 
   const handleCopyTextMoM = async () => {
-    const momText =
-      localMemory.mom?.trim() ||
-      localMemory.summary?.trim() ||
-      "No content available.";
+    const signature = "\n\nCreated by Neo AI\nhttps://neosapien.xyz";
+    const momContent = getMoMContent();
+    if (!momContent) {
+      toast({
+        title: "No content available",
+        description: "There is nothing to copy.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const titleSection = localMemory.title
+      ? `${localMemory.title.trim()}\n\n`
+      : "";
+    const plainText = stripMarkdownToPlainText(momContent);
+    const textContent = `${titleSection}${plainText}`.trim();
     try {
-      await navigator.clipboard.writeText(momText);
+      await navigator.clipboard.writeText(`${textContent}${signature}`);
       toast({
         title: "Copied to clipboard",
         description: "Content ready to share.",
@@ -2895,6 +2986,7 @@ function MemoryDetailView({
       localMemory.mom?.trim() ||
       localMemory.summary?.trim() ||
       "No content available.";
+
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
@@ -3128,7 +3220,7 @@ function MemoryDetailView({
 
         <div className="flex-1">
           {activeTab === "summary" ? (
-            <div className="space-y-6">
+            <div className="space-y-6 pb-16">
               {!localMemory.archived && (
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-muted mb-3">
@@ -3303,11 +3395,7 @@ function MemoryDetailView({
             </div>
           ) : (
             <div className="space-y-5">
-              {remindersLoading ? (
-                <div className="flex min-h-[200px] items-center justify-center text-muted">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              ) : memoryReminders.length === 0 ? (
+              {!remindersInitialized ? null : memoryReminders.length === 0 ? (
                 <div className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-dashed border-border/80 bg-surface/50 px-6 py-10 text-center">
                   <div className="mb-4 flex items-center justify-center">
                     <CheckSquare className="h-7 w-7 text-[#0f8b54]" />
@@ -3512,9 +3600,7 @@ function MemoryDetailView({
         <CreateReminderModal
           onClose={() => setCreateReminderModalOpen(false)}
           onSave={handleCreateLinkedReminder}
-          defaultValues={{
-            title: title,
-          }}
+          linkedMemoryTitle={title}
           containerClassName="z-[1100]"
         />
       )}
@@ -3829,6 +3915,20 @@ function AddParticipantModal({
   const [showParticipantSuggestions, setShowParticipantSuggestions] =
     useState(false);
   const [saving, setSaving] = useState(false);
+  const [localMetadataOptions, setLocalMetadataOptions] =
+    useState<string[]>(metadataOptions);
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const meta = await getMemoriesMetadata({});
+        setLocalMetadataOptions(meta.entities ?? []);
+      } catch (error) {
+        setLocalMetadataOptions(metadataOptions);
+      }
+    };
+    fetchMetadata();
+  }, []);
   const { participantChips, participantSet } = useMemo(() => {
     const seen = new Set<string>();
     const chips = existingParticipants.reduce<string[]>((acc, raw) => {
@@ -3842,13 +3942,39 @@ function AddParticipantModal({
     }, []);
     return { participantChips: chips, participantSet: seen };
   }, [existingParticipants]);
+  const highlightMatch = (text: string, query: string) => {
+    if (!query) return text;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const index = lowerText.indexOf(lowerQuery);
+    if (index === -1) return text;
+    return (
+      <span>
+        {text.substring(0, index)}
+        <span
+          className="text-[#0f8b54] font-semibold"
+          style={{ display: "inline" }}
+        >
+          {text.substring(index, index + query.length)}
+        </span>
+        {text.substring(index + query.length)}
+      </span>
+    );
+  };
+
   const participantSuggestions = useMemo(() => {
-    if (!metadataOptions.length || !participantName.trim()) {
+    const options = localMetadataOptions.length
+      ? localMetadataOptions
+      : metadataOptions;
+    if (!options.length) {
       return [];
     }
     const query = participantName.trim().toLowerCase();
+    if (!query) {
+      return [];
+    }
     const seen = new Set<string>();
-    return metadataOptions
+    return options
       .reduce<string[]>((acc, raw) => {
         const trimmed = raw?.trim();
         if (!trimmed) return acc;
@@ -3861,7 +3987,7 @@ function AddParticipantModal({
         return acc;
       }, [])
       .slice(0, 8);
-  }, [metadataOptions, participantName, participantSet]);
+  }, [localMetadataOptions, metadataOptions, participantName, participantSet]);
 
   useEscapeKey(onClose, true);
 
@@ -3948,17 +4074,17 @@ function AddParticipantModal({
                 type="text"
                 value={participantName}
                 onChange={(e) => {
-                  setParticipantName(e.target.value);
-                  setShowParticipantSuggestions(true);
+                  const newValue = e.target.value;
+                  setParticipantName(newValue);
+                  if (newValue.trim().length > 0) {
+                    setShowParticipantSuggestions(true);
+                  } else {
+                    setShowParticipantSuggestions(false);
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !saving && participantName.trim()) {
                     handleSave();
-                  }
-                }}
-                onFocus={() => {
-                  if (participantSuggestions.length > 0) {
-                    setShowParticipantSuggestions(true);
                   }
                 }}
                 onBlur={() => {
@@ -3971,8 +4097,8 @@ function AddParticipantModal({
             </div>
             {showParticipantSuggestions &&
               participantSuggestions.length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-20 mt-2 rounded-2xl border border-border/70 bg-surface shadow-lg">
-                  <p className="px-3 pt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-muted">
+                <div className="absolute left-0 right-0 top-full z-20 mt-2 rounded-2xl border border-border/70 bg-surface shadow-lg max-h-[200px] overflow-y-auto">
+                  <p className="px-3 pt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-muted sticky top-0 bg-surface">
                     Suggestions
                   </p>
                   <div className="py-2">
@@ -3985,7 +4111,7 @@ function AddParticipantModal({
                         }
                         className="flex w-full items-center justify-between px-4 py-2 text-sm text-left text-foreground hover:bg-[#0f8b54]/5"
                       >
-                        <span>{suggestion}</span>
+                        {highlightMatch(suggestion, participantName.trim())}
                       </button>
                     ))}
                   </div>
@@ -4035,6 +4161,20 @@ function AddTopicModal({
   const [topicName, setTopicName] = useState("");
   const [showTopicSuggestions, setShowTopicSuggestions] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [localMetadataOptions, setLocalMetadataOptions] =
+    useState<string[]>(metadataOptions);
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const meta = await getMemoriesMetadata({});
+        setLocalMetadataOptions(meta.tags ?? []);
+      } catch (error) {
+        setLocalMetadataOptions(metadataOptions);
+      }
+    };
+    fetchMetadata();
+  }, []);
   const { topicChips, topicSet } = useMemo(() => {
     const seen = new Set<string>();
     const chips = existingTopics.reduce<string[]>((acc, raw) => {
@@ -4048,13 +4188,39 @@ function AddTopicModal({
     }, []);
     return { topicChips: chips, topicSet: seen };
   }, [existingTopics]);
+  const highlightMatch = (text: string, query: string) => {
+    if (!query) return text;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const index = lowerText.indexOf(lowerQuery);
+    if (index === -1) return text;
+    return (
+      <span>
+        {text.substring(0, index)}
+        <span
+          className="text-[#0f8b54] font-semibold"
+          style={{ display: "inline" }}
+        >
+          {text.substring(index, index + query.length)}
+        </span>
+        {text.substring(index + query.length)}
+      </span>
+    );
+  };
+
   const topicSuggestions = useMemo(() => {
-    if (!metadataOptions.length || !topicName.trim()) {
+    const options = localMetadataOptions.length
+      ? localMetadataOptions
+      : metadataOptions;
+    if (!options.length) {
       return [];
     }
     const query = topicName.trim().toLowerCase();
+    if (!query) {
+      return [];
+    }
     const seen = new Set<string>();
-    return metadataOptions
+    return options
       .reduce<string[]>((acc, raw) => {
         const trimmed = raw?.trim();
         if (!trimmed) return acc;
@@ -4067,7 +4233,7 @@ function AddTopicModal({
         return acc;
       }, [])
       .slice(0, 8);
-  }, [metadataOptions, topicName, topicSet]);
+  }, [localMetadataOptions, metadataOptions, topicName, topicSet]);
 
   useEscapeKey(onClose, true);
 
@@ -4153,17 +4319,17 @@ function AddTopicModal({
                 type="text"
                 value={topicName}
                 onChange={(e) => {
-                  setTopicName(e.target.value);
-                  setShowTopicSuggestions(true);
+                  const newValue = e.target.value;
+                  setTopicName(newValue);
+                  if (newValue.trim().length > 0) {
+                    setShowTopicSuggestions(true);
+                  } else {
+                    setShowTopicSuggestions(false);
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !saving && topicName.trim()) {
                     handleSave();
-                  }
-                }}
-                onFocus={() => {
-                  if (topicSuggestions.length > 0) {
-                    setShowTopicSuggestions(true);
                   }
                 }}
                 onBlur={() => {
@@ -4175,8 +4341,8 @@ function AddTopicModal({
               />
             </div>
             {showTopicSuggestions && topicSuggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-20 mt-2 rounded-2xl border border-border/70 bg-surface shadow-lg">
-                <p className="px-3 pt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-muted">
+              <div className="absolute left-0 right-0 top-full z-20 mt-2 rounded-2xl border border-border/70 bg-surface shadow-lg max-h-[200px] overflow-y-auto">
+                <p className="px-3 pt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-muted sticky top-0 bg-surface">
                   Suggestions
                 </p>
                 <div className="py-2">
@@ -4187,7 +4353,7 @@ function AddTopicModal({
                       onClick={() => handleSelectTopicSuggestion(suggestion)}
                       className="flex w-full items-center justify-between px-4 py-2 text-sm text-left text-foreground hover:bg-[#0f8b54]/5"
                     >
-                      <span>{suggestion}</span>
+                      {highlightMatch(suggestion, topicName.trim())}
                     </button>
                   ))}
                 </div>
@@ -4230,30 +4396,36 @@ function EditNotesModal({
   onClose: () => void;
   onSave: (memoryId: string, notes: string) => void;
 }) {
-  const initialNotes =
-    memory.mom?.trim() || memory.summary?.trim() || "No notes yet.";
+  const initialNotes = memory.mom?.trim() || memory.summary?.trim() || "";
   const [notes, setNotes] = useState(initialNotes);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
   useEscapeKey(onClose, true);
 
+  const trimmedNotes = notes.trim();
+  const initialTrimmedNotes = initialNotes.trim();
+  const hasChanges =
+    trimmedNotes.length > 0 && trimmedNotes !== initialTrimmedNotes;
+
   const handleSave = async () => {
-    if (!notes.trim() || saving) return;
+    const sanitizedNotes = notes.trim();
+    if (saving || !sanitizedNotes || sanitizedNotes === initialTrimmedNotes)
+      return;
     setSaving(true);
     try {
       await updateMemory({
         memory_id: memory.id,
-        mom: notes,
+        mom: sanitizedNotes,
         entities: memory.entities ?? [],
         title: memory.title ?? "",
         tags: memory.tags ?? [],
         topics: memory.topics ?? [],
         domain: memory.domain ?? "",
-        summary: notes,
+        summary: sanitizedNotes,
         should_detect_corrections: true,
         correction_to_save: [],
       });
-      onSave(memory.id, notes);
+      onSave(memory.id, sanitizedNotes);
     } catch (error: any) {
       toast({
         title: "Unable to save notes",
@@ -4318,7 +4490,7 @@ function EditNotesModal({
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !notes.trim()}
+              disabled={saving || !hasChanges}
               className="rounded-full bg-[#0F8B54] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-70"
             >
               {saving ? "Saving..." : "Save"}
@@ -4459,6 +4631,7 @@ function ShareMemoryModal({
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-lg">
               💬
             </span>
+
             <div>
               <p>Share via WhatsApp</p>
               <p className="text-xs font-normal text-white/90">
@@ -4700,7 +4873,7 @@ function ReminderBadge({
 }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full bg-white dark:bg-gray-700 border-2 border-gray-400 dark:border-gray-500 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-900 dark:text-gray-100 ${className}`}
+      className={`inline-flex items-center rounded-full bg-background dark:bg-gray-700 border-2 border-gray-400 dark:border-gray-500 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-900 dark:text-gray-100 ${className}`}
       aria-label={`${count} reminder${count === 1 ? "" : "s"}`}
     >
       <span>

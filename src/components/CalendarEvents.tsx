@@ -1,3 +1,4 @@
+import { authManager } from "@/api/auth";
 import {
   calendarService,
   type CalendarEvent,
@@ -7,7 +8,6 @@ import { Loader } from "@/components/ui/loader";
 import type { RecordingState } from "@/hooks/useRecorder";
 import { useTimer } from "@/hooks/useTimer";
 import { formatElapsed } from "@/lib/time";
-import { useAuthContext } from "@/providers/AuthProvider";
 import { useNotifications } from "@/providers/NotificationProvider";
 import { useToast } from "@/providers/ToastProvider";
 import { Pause, Play, Square } from "lucide-react";
@@ -35,12 +35,10 @@ export function CalendarEvents({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connectingCalendar, setConnectingCalendar] = useState(false);
-  const { signInWithGoogle } = useAuthContext();
   const { toast } = useToast();
   const { registerEvents } = useNotifications();
   const timerStartTimeRef = useRef<number | null>(null);
   const timerAccumulatedTimeRef = useRef<number>(0);
-
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [eventTimerState, setEventTimerState] = useState<
     "idle" | "running" | "paused"
@@ -474,7 +472,8 @@ export function CalendarEvents({
   const handleConnectCalendar = async () => {
     try {
       setConnectingCalendar(true);
-      await signInWithGoogle();
+      // Use connectGoogleCalendar instead of signInWithGoogle to avoid overwriting user profile
+      await authManager.connectGoogleCalendar();
       toast({
         title: "Google Calendar connected",
         description: "Syncing upcoming events...",

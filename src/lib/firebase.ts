@@ -1,5 +1,10 @@
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
-import { getAuth, type Auth } from "firebase/auth";
+import {
+  browserLocalPersistence,
+  getAuth,
+  setPersistence,
+  type Auth,
+} from "firebase/auth";
 import { config } from "./electron";
 
 const firebaseConfig = {
@@ -61,6 +66,10 @@ export function getFirebaseAuth(): Auth | null {
 
   if (!auth) {
     auth = getAuth(firebaseApp);
+    // Set persistence to local for Electron to maintain sessions
+    setPersistence(auth, browserLocalPersistence).catch(() => {
+      // Fallback if persistence fails
+    });
   }
 
   return auth;

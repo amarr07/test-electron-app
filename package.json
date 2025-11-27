@@ -45,7 +45,6 @@
           ]
         }
       ],
-      "icon": "assets/logo.png",
       "artifactName": "${productName}-${version}-Setup.${ext}"
     },
     "mac": {
@@ -59,7 +58,6 @@
         }
       ],
       "category": "public.app-category.productivity",
-      "icon": "assets/logo.png",
       "artifactName": "${productName}-${version}.${ext}"
     },
     "nsis": {
@@ -92,6 +90,7 @@
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.9.6",
     "tailwind-merge": "^3.4.0"
   },

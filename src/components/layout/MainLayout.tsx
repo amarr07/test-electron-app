@@ -231,7 +231,7 @@ export function MainLayout() {
           <div className="flex-1 flex flex-col bg-background min-h-0">
             <div className="flex-1 overflow-y-auto min-h-0">
               <div
-                className={`w-full px-8 pb-8 h-full ${
+                className={`w-full px-8 pb-1 h-full ${
                   compactSections.has(activeSection) ? "pt-2" : "pt-8"
                 }`}
               >

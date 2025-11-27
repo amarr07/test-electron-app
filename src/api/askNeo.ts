@@ -592,13 +592,6 @@ function extractSources(payload: any) {
   return undefined;
 }
 
-/**
- * Placeholder for chat session deletion (not implemented).
- */
-export async function deleteChatSession(_chatId: string): Promise<void> {
-  return Promise.resolve();
-}
-
 export interface DynamicPrompt {
   id: string;
   text: string;

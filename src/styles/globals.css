@@ -136,6 +136,19 @@
  */
 @layer utilities {
   /**
+   * Draggable window region for custom title bar on macOS.
+   * Use on containers and override with .window-no-drag on interactive elements.
+   */
+  .window-drag-region {
+    -webkit-app-region: drag;
+    -webkit-user-select: none;
+  }
+
+  .window-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /**
    * Timer display styling (large monospace font).
    */
   .timer-display {

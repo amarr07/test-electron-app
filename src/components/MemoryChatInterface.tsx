@@ -545,10 +545,10 @@ export function MemoryChatInterface({
   return (
     <>
       <div
-        className={`fixed bottom-0 left-56 right-0 ${isOpen ? "z-30" : "z-40"} px-4 pb-4 pt-2`}
+        className={`fixed bottom-0 left-56 bg-background right-0 ${isOpen ? "z-30" : "z-40"} px-4 pt-2`}
       >
-        <div className="max-w-4xl mx-auto">
-          <div className="rounded-3xl bg-surface/95 backdrop-blur-md shadow-[0_10px_22px_rgba(0,0,0,0.14)] px-4 py-3 space-y-3">
+        <div className="mx-auto">
+          <div className="px-4 py-3 space-y-3">
             {labelText && (
               <div className="flex items-center justify-between px-1">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-muted">
@@ -580,7 +580,7 @@ export function MemoryChatInterface({
               </div>
             )}
             <div
-              className="flex items-center gap-2 rounded-2xl border border-border/60 bg-surface/95 px-4 py-3 transition cursor-text"
+              className="flex items-center gap-2 rounded-full border border-border/60 bg-surface/95 px-4 py-3 transition cursor-text focus-within:border-[#0f8b54] focus-within:shadow-[0_0_0_1px_rgba(15,139,84,0.35)]"
               onClick={handleInputClick}
             >
               <input
@@ -767,7 +767,7 @@ export function MemoryChatInterface({
             </div>
 
             <div className="px-6 py-4 border-t border-border/60 bg-surface">
-              <div className="flex items-center gap-2 rounded-full border border-[#d0d0d0] dark:border-border/60 bg-transparent px-3 py-1.5 transition">
+              <div className="flex items-center gap-2 rounded-full border border-[#d0d0d0] dark:border-border/60 bg-transparent px-3 py-1.5 transition focus-within:border-[#0f8b54] focus-within:shadow-[0_0_0_1px_rgba(15,139,84,0.35)]">
                 <input
                   ref={overlayInputRef}
                   type="text"

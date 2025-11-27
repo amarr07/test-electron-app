@@ -15,12 +15,10 @@ import { useAuthContext } from "@/providers/AuthProvider";
 import { useThemeContext } from "@/providers/ThemeProvider";
 import { useToast } from "@/providers/ToastProvider";
 import {
-  Apple,
   Bug,
   ChevronDown,
   HelpCircle,
   LogOut,
-  Mail,
   MonitorSmartphone,
   Pencil,
   Plus,
@@ -32,7 +30,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface SettingsModalProps {
   open: boolean;
@@ -61,7 +59,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [dictionaryWords, setDictionaryWords] = useState<
     CustomDictionaryWord[]
   >([]);
-  const [loadingDictionary, setLoadingDictionary] = useState(false);
   const [dictionaryError, setDictionaryError] = useState<string | null>(null);
   const [addingWord, setAddingWord] = useState(false);
   const [isAddingWord, setIsAddingWord] = useState(false);
@@ -73,6 +70,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [newWord, setNewWord] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEscapeKey(() => {
     if (open) {
@@ -125,6 +123,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   }, [open]);
 
   useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
     if (!open) return;
     let cancelled = false;
     const loadAutoLaunch = async () => {
@@ -152,15 +156,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
    * Loads custom dictionary words for transcription corrections.
    */
   const loadDictionaryWords = async () => {
-    setLoadingDictionary(true);
     setDictionaryError(null);
     try {
       const words = await getCustomDictionaryWords();
       setDictionaryWords(words);
     } catch (error: any) {
       setDictionaryError(error?.message || "Failed to load dictionary words");
-    } finally {
-      setLoadingDictionary(false);
     }
   };
 
@@ -529,23 +530,54 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setBugDetails("");
   };
 
+  const displayName = useMemo(() => {
+    const trimmed = fullName.trim();
+    if (trimmed) return trimmed;
+    if (user?.displayName?.trim()) return user.displayName.trim();
+    if (user?.email) return user.email.split("@")[0];
+    return "Unnamed user";
+  }, [fullName, user?.displayName, user?.email]);
+
   const userInitial =
-    user?.displayName?.[0]?.toUpperCase() ||
-    user?.email?.[0]?.toUpperCase() ||
-    "U";
+    displayName?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || "U";
 
   const isDarkMode = theme === "dark";
   const isDesktopApp = Boolean(window.electronAPI);
-  const primaryProvider = useMemo(() => {
-    const providerId = user?.providerData?.[0]?.providerId;
-    if (providerId === "google.com") {
-      return { label: "Google", type: "google" as const };
+  const deviceInfo = useMemo(() => {
+    if (typeof navigator === "undefined") {
+      return "Unknown device";
     }
-    if (providerId === "apple.com") {
-      return { label: "Apple", type: "apple" as const };
+
+    const platform =
+      (navigator as any)?.userAgentData?.platform ||
+      navigator.platform ||
+      navigator.userAgent ||
+      "";
+    const ua = (navigator.userAgent || "").toLowerCase();
+    const normalizedPlatform = (platform || "").toLowerCase();
+    const hint = `${normalizedPlatform} ${ua}`.trim();
+
+    const isMobile =
+      /iphone|ipad|android|mobile/.test(hint) ||
+      Boolean((navigator as any)?.userAgentData?.mobile);
+
+    const typeLabel = isMobile ? "Mobile" : "Desktop";
+
+    let osLabel = "Unknown OS";
+    if (hint.includes("mac") || hint.includes("os x")) {
+      osLabel = "macOS";
+    } else if (hint.includes("win")) {
+      osLabel = "Windows";
+    } else if (hint.includes("linux")) {
+      osLabel = "Linux";
+    } else if (hint.includes("ios")) {
+      osLabel = "iOS";
+    } else if (hint.includes("android")) {
+      osLabel = "Android";
     }
-    return { label: "Email", type: "email" as const };
-  }, [user?.providerData?.[0]?.providerId]);
+
+    return `${osLabel} - ${typeLabel}`;
+  }, []);
 
   if (!open) {
     return null;
@@ -578,46 +610,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       disabled: autoLaunchSaving || !isDesktopApp,
     },
   ];
-
-  const ProviderIcon = ({
-    type,
-    className,
-  }: {
-    type: "google" | "apple" | "email";
-    className?: string;
-  }) => {
-    if (type === "google") {
-      return (
-        <svg
-          className={className}
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path
-            fill="#4285F4"
-            d="M22.5 12.23c0-.82-.07-1.42-.22-2.04H12v3.71h5.98c-.12.92-.79 2.3-2.27 3.22l-.02.11 3.3 2.56.23.02c2.12-1.95 3.28-4.82 3.28-7.88"
-          />
-          <path
-            fill="#34A853"
-            d="M12 23c2.97 0 5.46-.98 7.28-2.69l-3.46-2.68c-.93.62-2.18 1.05-3.82 1.05-2.92 0-5.4-1.95-6.28-4.65l-.1.01-3.39 2.63-.04.1C3.96 20.53 7.65 23 12 23"
-          />
-          <path
-            fill="#FBBC05"
-            d="M5.72 13.03a6.8 6.8 0 0 1-.38-2.23c0-.78.14-1.53.36-2.23l-.01-.15-3.43-2.67-.11.05A10.012 10.012 0 0 0 2 10.8c0 1.62.39 3.16 1.14 4.52l3.56-2.3"
-          />
-          <path
-            fill="#EB4335"
-            d="M12 4.98c2.06 0 3.45.89 4.24 1.63l3.09-3.02C17.44 1.61 14.97.5 12 .5 7.65.5 3.96 3 1.87 6.83l3.45 2.24C6.2 6.92 9.08 4.98 12 4.98"
-          />
-        </svg>
-      );
-    }
-    if (type === "apple") {
-      return <Apple className={className} />;
-    }
-    return <Mail className={className} />;
-  };
 
   const renderToggle = (on: boolean, toggle: () => void, disabled = false) => (
     <button
@@ -662,24 +654,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   {userInitial}
                 </div>
               )}
-              <div className="flex flex-1 items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">
-                    {user?.displayName || "Unnamed user"}
-                  </p>
-                  <p className="text-xs text-muted">{user?.email}</p>
-                </div>
-                <div className="inline-flex items-center gap-1 rounded-full border border-[#d0d0d0] dark:border-[#404040] bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground/80 shadow-sm">
-                  <ProviderIcon
-                    type={primaryProvider.type}
-                    className={`h-3.5 w-3.5 ${
-                      primaryProvider.type === "google"
-                        ? ""
-                        : "text-foreground/80"
-                    }`}
-                  />
-                  <span>{primaryProvider.label}</span>
-                </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">
+                  {displayName}
+                </p>
+                <p className="text-xs text-muted">{user?.email}</p>
               </div>
             </div>
           </div>
@@ -808,7 +787,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">
-                Windows 11 - Desktop
+                {deviceInfo}
               </p>
               <p className="text-xs text-muted">
                 Last active{" "}
@@ -831,11 +810,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       icon: Sparkles,
       content: (
         <div className="space-y-4">
-          {loadingDictionary ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#0f8b54] border-t-transparent" />
-            </div>
-          ) : dictionaryError ? (
+          {dictionaryError ? (
             <div className="rounded-2xl border border-[#d0d0d0] dark:border-[#404040] bg-surface shadow-sm p-8 text-center space-y-4">
               <p className="text-sm font-semibold text-foreground">
                 Failed to load dictionary
@@ -976,7 +951,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     },
     {
       id: "privacy",
-      label: "Privacy",
+      label: "Privacy Policy",
       icon: ShieldCheck,
       content: (
         <div className="space-y-3 text-sm text-foreground leading-relaxed">
@@ -1167,7 +1142,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           </aside>
 
-          <section className="flex-1 overflow-y-auto bg-surface px-6 py-5">
+          <section
+            ref={contentRef}
+            className="flex-1 overflow-y-auto bg-surface px-6 py-5"
+          >
             {activeSectionData && (
               <div className="space-y-5">
                 <div className="flex items-center gap-3">

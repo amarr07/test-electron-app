@@ -130,88 +130,170 @@ class AuthManager {
   }
 
   /**
-   * Signs in with Google OAuth using Electron OAuth window.
-   * Opens external OAuth window and extracts tokens from redirect URL.
+   * Connects Google Calendar without signing in to Firebase.
+   * Only gets calendar access token for existing signed-in users.
+   */
+  async connectGoogleCalendar(): Promise<string> {
+    if (!electronAPI) {
+      throw new Error("Electron API not available");
+    }
+
+    const clientId = config.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      throw new Error("Google Client ID not configured");
+    }
+
+    // Only request calendar scope, don't sign in
+    const redirectUri = `https://${config.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/handler`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "token",
+      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      prompt: "select_account",
+    });
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+    const result = await new Promise<{ url: string }>((resolve, reject) => {
+      if (!electronAPI) {
+        reject(new Error("Electron API not available"));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        electronAPI?.removeAuthCallback();
+        reject(new Error("Authentication timeout"));
+      }, 120000);
+
+      const handleCallback = (data: { url: string }) => {
+        clearTimeout(timeout);
+        electronAPI?.removeAuthCallback();
+        resolve(data);
+      };
+
+      electronAPI.onAuthCallback(handleCallback);
+      electronAPI.openOAuthWindow({
+        url: authUrl,
+        callbackUrl: redirectUri,
+      });
+    });
+
+    const urlParams = new URLSearchParams(result.url.split("#")[1] || "");
+    const accessToken = urlParams.get("access_token");
+
+    if (!accessToken) {
+      throw new Error("No access token received from Google");
+    }
+
+    await storage.setGoogleAccessToken(accessToken);
+    return accessToken;
+  }
+
+  /**
+   * Signs in with Google using custom OAuth window for Electron.
+   * Works in both dev and production builds.
    */
   async signInWithGoogle(): Promise<User> {
     const auth = this.ensureAuth();
 
-    if (!electronAPI?.openOAuthWindow) {
+    if (!electronAPI) {
       throw new Error("Electron API not available");
     }
 
-    const api = electronAPI;
-
     try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope("https://www.googleapis.com/auth/userinfo.email");
-      provider.addScope("https://www.googleapis.com/auth/userinfo.profile");
-      provider.addScope("https://www.googleapis.com/auth/calendar.readonly");
-      provider.setCustomParameters({ prompt: "consent" });
-
-      const apiKey = config.FIREBASE_API_KEY;
-      const authDomain = config.FIREBASE_AUTH_DOMAIN;
-
-      if (!apiKey || !authDomain) {
-        throw new Error("Firebase configuration missing");
+      const clientId = config.GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        throw new Error("Google Client ID not configured");
       }
 
-      const providerId = provider.providerId;
-      const scopes = provider.getScopes().join(",");
-      const customParams = new URLSearchParams({
-        apiKey,
-        providerId,
-        scopes,
-        redirectUrl: `https://${authDomain}/__/auth/handler`,
-        eventId: Math.random().toString(36).substring(7),
-        v: "10.7.0",
+      // Build Google OAuth URL
+      const scopes = [
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/calendar.readonly",
+      ];
+
+      const redirectUri = `https://${config.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/handler`;
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: "id_token token",
+        scope: scopes.join(" "),
+        prompt: "select_account",
+        nonce: Math.random().toString(36),
       });
 
-      const oauthUrl = `https://${authDomain}/__/auth/handler?${customParams.toString()}`;
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
+      // Open OAuth window and wait for callback
       const result = await new Promise<{ url: string }>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          api.removeAuthCallback();
-          reject(new Error("OAuth timeout"));
+        if (!electronAPI) {
+          reject(new Error("Electron API not available"));
+          return;
+        }
+
+        const timeout = setTimeout(() => {
+          electronAPI?.removeAuthCallback();
+          reject(new Error("Authentication timeout"));
         }, 120000);
 
-        api.onAuthCallback((data: { url: string }) => {
-          clearTimeout(timeoutId);
-          api.removeAuthCallback();
+        const handleCallback = (data: { url: string }) => {
+          clearTimeout(timeout);
+          electronAPI?.removeAuthCallback();
           resolve(data);
-        });
+        };
 
-        api
-          .openOAuthWindow({
-            url: oauthUrl,
-            callbackUrl: `https://${authDomain}/__/auth/handler`,
-          })
-          .catch((err) => {
-            clearTimeout(timeoutId);
-            api.removeAuthCallback();
-            reject(err);
-          });
+        electronAPI.onAuthCallback(handleCallback);
+        electronAPI.openOAuthWindow({
+          url: authUrl,
+          callbackUrl: redirectUri,
+        });
       });
 
+      // Parse tokens from callback URL
       const urlParams = new URLSearchParams(result.url.split("#")[1] || "");
       const idToken = urlParams.get("id_token");
       const accessToken = urlParams.get("access_token");
-      const expiresIn = urlParams.get("expires_in");
 
       if (!idToken) {
         throw new Error("No ID token received from Google");
       }
 
-      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      const credential = GoogleAuthProvider.credential(
+        idToken,
+        accessToken || undefined,
+      );
       const userCredential = await signInWithCredential(auth, credential);
 
       if (accessToken) {
-        const expiresInSeconds = expiresIn
-          ? parseInt(expiresIn, 10)
-          : undefined;
-        await storage.setGoogleAccessToken(accessToken, expiresInSeconds);
-      } else {
-        await storage.clearGoogleAccessToken();
+        await storage.setGoogleAccessToken(accessToken);
+      }
+
+      const currentUser = userCredential.user;
+      if (accessToken && (!currentUser.displayName || !currentUser.photoURL)) {
+        try {
+          const userInfoResponse = await fetch(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            },
+          );
+
+          if (userInfoResponse.ok) {
+            const userInfo = await userInfoResponse.json();
+            const { updateProfile } = await import("firebase/auth");
+
+            await updateProfile(currentUser, {
+              displayName: userInfo.name || currentUser.displayName,
+              photoURL: userInfo.picture || currentUser.photoURL,
+            });
+
+            await currentUser.reload();
+          }
+        } catch {}
       }
 
       return userCredential.user;
@@ -222,80 +304,148 @@ class AuthManager {
   }
 
   /**
-   * Signs in with Apple OAuth using Electron OAuth window.
+   * Signs in with Apple using custom OAuth window for Electron.
+   * Requires Apple OAuth configuration in Firebase Console.
+   * Works in both dev and production builds.
    */
   async signInWithApple(): Promise<User> {
     const auth = this.ensureAuth();
 
-    if (!electronAPI?.openOAuthWindow) {
+    if (!electronAPI) {
       throw new Error("Electron API not available");
     }
 
-    const api = electronAPI;
-
     try {
-      const provider = new OAuthProvider("apple.com");
-      provider.addScope("email");
-      provider.addScope("name");
-
-      const apiKey = config.FIREBASE_API_KEY;
-      const authDomain = config.FIREBASE_AUTH_DOMAIN;
-
-      if (!apiKey || !authDomain) {
-        throw new Error("Firebase configuration missing");
+      const clientId = config.APPLE_CLIENT_ID;
+      if (!clientId) {
+        throw new Error("Apple Client ID not configured in .env file");
       }
 
-      const providerId = provider.providerId;
-      const scopes = provider.getScopes().join(",");
-      const customParams = new URLSearchParams({
-        apiKey,
-        providerId,
-        scopes,
-        redirectUrl: `https://${authDomain}/__/auth/handler`,
-        eventId: Math.random().toString(36).substring(7),
-        v: "10.7.0",
+      // Generate nonce for security
+      const generateNonce = () => {
+        const charset =
+          "0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._";
+        let result = "";
+        const randomValues = new Uint8Array(32);
+        crypto.getRandomValues(randomValues);
+        randomValues.forEach((v) => {
+          result += charset[v % charset.length];
+        });
+        return result;
+      };
+
+      const rawNonce = generateNonce();
+      const state = Math.random().toString(36).substring(2);
+
+      // Hash the nonce using SHA-256 (required by Apple)
+      const hashNonce = async (nonce: string) => {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(nonce);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+      };
+
+      const hashedNonce = await hashNonce(rawNonce);
+
+      // Build Apple OAuth URL
+      // Note: Apple requires Service ID, Team ID, Key ID, and Private Key to be configured
+      // in Firebase Console > Authentication > Sign-in method > Apple
+      const redirectUri = `https://${config.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/handler`;
+
+      // Use "code id_token" to get both authorization code AND id_token
+      // We'll use the id_token directly, avoiding server-side exchange
+      // response_mode=fragment puts tokens in URL hash which we can detect
+      // IMPORTANT: Apple requires the SHA256 hash of the nonce, not the raw nonce
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: "code id_token",
+        response_mode: "fragment",
+        state: state,
+        nonce: hashedNonce, // Send hashed nonce to Apple
       });
 
-      const oauthUrl = `https://${authDomain}/__/auth/handler?${customParams.toString()}`;
+      const authUrl = `https://appleid.apple.com/auth/authorize?${params.toString()}`;
 
+      // Open OAuth window and wait for callback
       const result = await new Promise<{ url: string }>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          api.removeAuthCallback();
-          reject(new Error("OAuth timeout"));
+        if (!electronAPI) {
+          reject(new Error("Electron API not available"));
+          return;
+        }
+
+        const timeout = setTimeout(() => {
+          electronAPI?.removeAuthCallback();
+          reject(
+            new Error(
+              "Authentication timeout - window closed or no response received",
+            ),
+          );
         }, 120000);
 
-        api.onAuthCallback((data: { url: string }) => {
-          clearTimeout(timeoutId);
-          api.removeAuthCallback();
+        const handleCallback = (data: { url: string }) => {
+          clearTimeout(timeout);
+          electronAPI?.removeAuthCallback();
           resolve(data);
-        });
+        };
 
-        api
-          .openOAuthWindow({
-            url: oauthUrl,
-            callbackUrl: `https://${authDomain}/__/auth/handler`,
-          })
-          .catch((err) => {
-            clearTimeout(timeoutId);
-            api.removeAuthCallback();
-            reject(err);
-          });
+        electronAPI.onAuthCallback(handleCallback);
+        electronAPI.openOAuthWindow({
+          url: authUrl,
+          callbackUrl: redirectUri,
+        });
       });
 
-      const urlParams = new URLSearchParams(result.url.split("#")[1] || "");
-      const idToken = urlParams.get("id_token");
+      // Parse ID token from callback URL
+      const fragment = result.url.split("#")[1] || "";
+      const query = result.url.split("?")[1]?.split("#")[0] || "";
 
+      // Try fragment first (response_mode=fragment puts it in hash)
+      let urlParams = new URLSearchParams(fragment);
+      let idToken = urlParams.get("id_token");
+
+      // Fallback to query params
       if (!idToken) {
-        throw new Error("No ID token received from Apple");
+        urlParams = new URLSearchParams(query);
+        idToken = urlParams.get("id_token");
       }
 
+      // Check for errors in response
+      const error = urlParams.get("error");
+      const errorDescription = urlParams.get("error_description");
+      if (error) {
+        throw new Error(
+          `Apple Sign-In error: ${error}${errorDescription ? ` - ${errorDescription}` : ""}`,
+        );
+      }
+
+      if (!idToken) {
+        throw new Error(
+          "No ID token received from Apple. " +
+            "Callback URL: " +
+            result.url +
+            ". " +
+            "Please ensure Apple OAuth is properly configured in Firebase Console " +
+            "and that response_type=id_token is supported by your Apple Service ID.",
+        );
+      }
+
+      // Sign in to Firebase with the Apple credential
+      // IMPORTANT: Use the raw (unhashed) nonce for Firebase verification
+      const provider = new OAuthProvider("apple.com");
       const credential = provider.credential({
-        idToken: idToken,
+        idToken,
+        rawNonce: rawNonce,
       });
       const userCredential = await signInWithCredential(auth, credential);
 
       return userCredential.user;
     } catch (error: any) {
+      // Provide helpful error messages
+      if (error.message?.includes("No ID token")) {
+        throw error; // Already has helpful message
+      }
       throw this.handleAuthError(error);
     }
   }

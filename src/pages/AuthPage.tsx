@@ -1,9 +1,10 @@
 import { AuthButton } from "@/components/AuthButton";
 import { AuthModal } from "@/components/AuthModal";
 import { ForgotPasswordModal } from "@/components/ForgotPasswordModal";
+import { Button } from "@/components/ui/button";
 import { useAuthContext } from "@/providers/AuthProvider";
 import { useToast } from "@/providers/ToastProvider";
-import { Check } from "lucide-react";
+import { Check, Info } from "lucide-react";
 import { useState } from "react";
 import logoBlack from "../../assets/neosapien-black.svg";
 import logoWhite from "../../assets/neosapien-white.svg";
@@ -14,19 +15,25 @@ import logoWhite from "../../assets/neosapien-white.svg";
  * Manages modals for email auth and password reset.
  */
 export function AuthPage() {
+  const { toast } = useToast();
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [forgotPasswordModalOpen, setForgotPasswordModalOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState<"google" | "apple" | null>(
     null,
   );
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const { signInWithGoogle, signInWithApple } = useAuthContext();
-  const { toast } = useToast();
 
   /**
    * Handles Google OAuth sign-in with loading state and error handling.
    */
   const handleGoogleSignIn = async () => {
+    if (!agreedToTerms) {
+      setShowTermsModal(true);
+      return;
+    }
+
     setAuthLoading("google");
     try {
       await signInWithGoogle();
@@ -45,6 +52,11 @@ export function AuthPage() {
    * Handles Apple OAuth sign-in with loading state and error handling.
    */
   const handleAppleSignIn = async () => {
+    if (!agreedToTerms) {
+      setShowTermsModal(true);
+      return;
+    }
+
     setAuthLoading("apple");
     try {
       await signInWithApple();
@@ -80,8 +92,14 @@ export function AuthPage() {
         <div className="flex flex-col gap-3.5 w-full mt-1">
           <AuthButton
             provider="email"
-            onClick={() => setEmailModalOpen(true)}
-            disabled={!agreedToTerms}
+            onClick={() => {
+              if (!agreedToTerms) {
+                setShowTermsModal(true);
+                return;
+              }
+              setEmailModalOpen(true);
+            }}
+            disabled={false}
           />
           <div className="flex items-center gap-4 w-full my-2">
             <span className="flex-1 h-px bg-border" />
@@ -93,12 +111,12 @@ export function AuthPage() {
           <AuthButton
             provider="google"
             onClick={handleGoogleSignIn}
-            disabled={authLoading === "google" || !agreedToTerms}
+            disabled={authLoading === "google"}
           />
           <AuthButton
             provider="apple"
             onClick={handleAppleSignIn}
-            disabled={authLoading === "apple" || !agreedToTerms}
+            disabled={authLoading === "apple"}
           />
         </div>
 
@@ -153,6 +171,41 @@ export function AuthPage() {
         <ForgotPasswordModal
           onClose={() => setForgotPasswordModalOpen(false)}
         />
+      )}
+
+      {showTermsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3"
+          onClick={() => setShowTermsModal(false)}
+        >
+          <div
+            className="w-full max-w-xs rounded-xl border border-border/70 bg-surface px-4 py-3 text-sm flex items-start gap-3 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mt-0.5 inline-flex h-6 w-6 items-center justify-center text-primary">
+              <Info className="h-3.5 w-3.5" />
+            </div>
+            <div className="space-y-2">
+              <p className="font-medium text-foreground">
+                Please agree to the terms first
+              </p>
+              <p className="text-xs text-muted leading-relaxed">
+                Check the box below to confirm you agree to our Terms of Service
+                and Privacy Policy before continuing.
+              </p>
+              <div className="flex justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setShowTermsModal(false)}
+                >
+                  Okay
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

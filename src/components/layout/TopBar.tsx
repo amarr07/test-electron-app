@@ -47,6 +47,7 @@ export function TopBar({
   }>({ memories: [], reminders: [], sessions: [] });
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notificationMenuRef = useRef<HTMLDivElement | null>(null);
+  const notificationButtonRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const requestIdRef = useRef(0);
@@ -61,9 +62,13 @@ export function TopBar({
   useEffect(() => {
     if (!notificationsOpen) return;
     const handleClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (notificationButtonRef.current?.contains(target)) {
+        return;
+      }
       if (
         notificationMenuRef.current &&
-        !notificationMenuRef.current.contains(event.target as Node)
+        !notificationMenuRef.current.contains(target)
       ) {
         setNotificationsOpen(false);
       }
@@ -261,8 +266,8 @@ export function TopBar({
   };
 
   return (
-    <div className="h-14 flex flex-shrink-0 items-center gap-6 px-8">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+    <div className="h-14 flex flex-shrink-0 items-center gap-6 px-8 window-drag-region">
+      <div className="flex items-center gap-3 flex-1 min-w-0 window-no-drag">
         <button
           type="button"
           onClick={onBack}
@@ -481,10 +486,14 @@ export function TopBar({
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 window-no-drag">
         <div className="relative">
           <button
-            onClick={handleToggleNotifications}
+            ref={notificationButtonRef}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleNotifications();
+            }}
             className="p-2 rounded-lg hover:bg-surface/60 text-muted hover:text-foreground transition-all duration-200 relative"
             aria-label="Notifications"
           >

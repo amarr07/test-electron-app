@@ -41,8 +41,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getStorage: (key) => ipcRenderer.invoke("get-storage", key),
   setStorage: (key, value) => ipcRenderer.invoke("set-storage", key, value),
   removeStorage: (key) => ipcRenderer.invoke("remove-storage", key),
-  setThemePreference: (theme) =>
-    ipcRenderer.invoke("set-theme-preference", theme),
+  setThemePreference: (theme) => ipcRenderer.invoke("set-theme", theme),
   getAudioSources: () => ipcRenderer.invoke("get-audio-sources"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
   /**

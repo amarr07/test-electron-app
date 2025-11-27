@@ -1,358 +1,516 @@
-    /**
-     * Electron main process entry point.
-     * Manages application lifecycle, window creation, IPC handlers, and system integration.
-     */
-    const {
-      app,
-      BrowserWindow,
-      ipcMain,
-      nativeTheme,
-      desktopCapturer,
-      session,
-    } = require("electron");
-    const path = require("path");
-    const ElectronStore = require("electron-store");
-    const Store = ElectronStore.default || ElectronStore;
+/**
+ * Electron main process entry point.
+ * Manages application lifecycle, window creation, IPC handlers, and system integration.
+ */
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  nativeTheme,
+  desktopCapturer,
+  session,
+} = require("electron");
+const path = require("path");
+const ElectronStore = require("electron-store");
+const Store = ElectronStore.default || ElectronStore;
 
-    /**
-     * Enable hot reload in development mode.
-     */
-    if (process.env.NODE_ENV === "development" || !app.isPackaged) {
-      try {
-        require("electron-reload")(__dirname, {
-          electron: path.join(__dirname, "node_modules", ".bin", "electron"),
-          hardResetMethod: "exit",
-        });
-      } catch (e) {}
+/**
+ * Enable hot reload in development mode.
+ */
+if (process.env.NODE_ENV === "development" || !app.isPackaged) {
+  try {
+    require("electron-reload")(__dirname, {
+      electron: path.join(__dirname, "node_modules", ".bin", "electron"),
+      hardResetMethod: "exit",
+    });
+  } catch (e) {}
+}
+
+/**
+ * Persistent storage for app settings (theme, auto-launch, etc).
+ */
+const store = new Store();
+
+/**
+ * Disable hardware acceleration and GPU features for compatibility.
+ */
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+app.commandLine.appendSwitch("disable-gpu-compositing");
+app.commandLine.appendSwitch("disable-features", "OutOfBlinkCors");
+app.commandLine.appendSwitch("log-level", "3");
+
+let mainWindow = null;
+let oauthWindow = null;
+
+/**
+ * Gets stored theme preference from persistent storage.
+ */
+const getStoredTheme = () => {
+  const stored = store.get("theme", "light");
+  return stored === "dark" ? "dark" : "light";
+};
+
+/**
+ * Configures auto-launch on system startup and persists setting.
+ */
+const syncAutoLaunch = (enabled) => {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!enabled,
+      openAsHidden: !!enabled,
+    });
+    store.set("autoLaunch", !!enabled);
+  } catch (error) {}
+};
+
+/**
+ * Creates and configures the main application window.
+ */
+function createWindow() {
+  const savedTheme = getStoredTheme();
+  nativeTheme.themeSource = savedTheme;
+
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 720,
+    minWidth: 800,
+    minHeight: 600,
+    resizable: true,
+    icon: path.join(__dirname, "assets", "logo.png"),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      preload: path.join(__dirname, "preload.js"),
+      webSecurity: false,
+    },
+    crossOriginOpenerPolicy: { value: "unsafe-none" },
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    backgroundColor: savedTheme === "dark" ? "#0a0a0a" : "#ffffff",
+    show: false,
+  });
+
+  /**
+   * Modifies response headers to set permissive CSP for development.
+   */
+  mainWindow.webContents.session.webRequest.onHeadersReceived(
+    (details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [
+            "default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:; frame-src *;",
+          ],
+        },
+      });
+    },
+  );
+
+  if (process.env.NODE_ENV === "development" || !app.isPackaged) {
+    mainWindow.loadURL("http://localhost:5173");
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "dist", "index.html"));
+  }
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
+
+/**
+ * Creates OAuth authentication window for Google/Apple sign-in.
+ */
+function createOAuthWindow(url, callbackUrl) {
+  if (oauthWindow) {
+    oauthWindow.focus();
+    return oauthWindow;
+  }
+
+  oauthWindow = new BrowserWindow({
+    width: 500,
+    height: 700,
+    modal: true,
+    parent: mainWindow,
+    icon: path.join(__dirname, "assets", "logo.png"),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false, // Disable web security to allow Apple's OAuth page to work.
+    },
+    crossOriginOpenerPolicy: { value: "unsafe-none" },
+  });
+
+  oauthWindow.webContents.session.webRequest.onHeadersReceived(
+    { urls: ["https://appleid.apple.com/*"] },
+    (details, callback) => {
+      const headers = details.responseHeaders;
+
+      // Remove or modify CSP headers that block blob workers.
+      if (headers["content-security-policy"]) {
+        delete headers["content-security-policy"];
+      }
+      if (headers["Content-Security-Policy"]) {
+        delete headers["Content-Security-Policy"];
+      }
+
+      callback({ responseHeaders: headers });
+    },
+  );
+
+  // Intercept web requests to capture POST data from Apple.
+  oauthWindow.webContents.session.webRequest.onBeforeRequest(
+    { urls: [callbackUrl + "*"] },
+    (details, callback) => {
+      if (details.method === "POST" && details.uploadData) {
+        try {
+          // Parse form POST data.
+          const postData = details.uploadData
+            .map((data) => {
+              const text = data.bytes ? data.bytes.toString("utf8") : "";
+              return text;
+            })
+            .join("");
+
+          const params = new URLSearchParams(postData);
+          const idToken = params.get("id_token");
+          const code = params.get("code");
+
+          if (idToken || code) {
+            authCallbackHandled = true;
+            const dataUrl = callbackUrl + "?" + postData;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("auth-callback", { url: dataUrl });
+            }
+            callback({});
+            setTimeout(() => {
+              if (oauthWindow && !oauthWindow.isDestroyed()) {
+                oauthWindow.close();
+              }
+            }, 100);
+            return;
+          }
+        } catch (error) {
+          console.error("Error parsing POST data:", error);
+        }
+      }
+      callback({});
+    },
+  );
+
+  let authCallbackHandled = false;
+
+  const checkForTokens = async () => {
+    if (authCallbackHandled || !oauthWindow || oauthWindow.isDestroyed()) {
+      return;
     }
 
-    /**
-     * Persistent storage for app settings (theme, auto-launch, etc.).
-     */
-    const store = new Store();
-
-    /**
-     * Disable hardware acceleration and GPU features for compatibility.
-     */
-    app.disableHardwareAcceleration();
-    app.commandLine.appendSwitch("disable-gpu");
-    app.commandLine.appendSwitch("disable-gpu-compositing");
-    app.commandLine.appendSwitch("disable-features", "OutOfBlinkCors");
-    app.commandLine.appendSwitch("log-level", "3");
-
-    let mainWindow = null;
-    let oauthWindow = null;
-
-    /**
-     * Gets stored theme preference from persistent storage.
-     */
-    const getStoredTheme = () => {
-      const stored = store.get("theme", "light");
-      return stored === "dark" ? "dark" : "light";
-    };
-
-    /**
-     * Configures auto-launch on system startup and persists setting.
-     */
-    const syncAutoLaunch = (enabled) => {
-      try {
-        app.setLoginItemSettings({
-          openAtLogin: !!enabled,
-          openAsHidden: !!enabled,
-        });
-        store.set("autoLaunch", !!enabled);
-      } catch (error) {}
-    };
-
-    /**
-     * Creates and configures the main application window.
-     */
-    function createWindow() {
-      const savedTheme = getStoredTheme();
-      nativeTheme.themeSource = savedTheme;
-
-      mainWindow = new BrowserWindow({
-        width: 1280,
-        height: 720,
-        minWidth: 800,
-        minHeight: 600,
-        resizable: true,
-        icon: path.join(__dirname, "assets", "logo.png"),
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-          sandbox: false,
-          preload: path.join(__dirname, "preload.js"),
-          webSecurity: false,
-        },
-        crossOriginOpenerPolicy: { value: "unsafe-none" },
-        titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-        backgroundColor: savedTheme === "dark" ? "#0a0a0a" : "#ffffff",
-        show: false,
-      });
-
-      /**
-       * Modifies response headers to set permissive CSP for development.
-       */
-      mainWindow.webContents.session.webRequest.onHeadersReceived(
-        (details, callback) => {
-          callback({
-            responseHeaders: {
-              ...details.responseHeaders,
-              "Content-Security-Policy": [
-                "default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:; frame-src *;",
-              ],
-            },
-          });
-        },
+    try {
+      const url = await oauthWindow.webContents.executeJavaScript(
+        "window.location.href",
+        true,
       );
 
-      if (process.env.NODE_ENV === "development" || !app.isPackaged) {
-        mainWindow.loadURL("http://localhost:5173");
-        mainWindow.webContents.openDevTools();
-      } else {
-        mainWindow.loadFile(path.join(__dirname, "dist", "index.html"));
-      }
-
-      mainWindow.once("ready-to-show", () => {
-        mainWindow.show();
-      });
-
-      mainWindow.on("closed", () => {
-        mainWindow = null;
-      });
-    }
-
-    /**
-     * Creates OAuth authentication window for Google/Apple sign-in.
-     */
-    function createOAuthWindow(url, callbackUrl) {
-      if (oauthWindow) {
-        oauthWindow.focus();
-        return oauthWindow;
-      }
-
-      oauthWindow = new BrowserWindow({
-        width: 500,
-        height: 700,
-        modal: true,
-        parent: mainWindow,
-        icon: path.join(__dirname, "assets", "logo.png"),
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-        },
-        crossOriginOpenerPolicy: { value: "unsafe-none" },
-      });
-
-      /**
-       * Detects OAuth callback URLs and forwards to renderer process.
-       */
-      let authCallbackHandled = false;
-
-      const forwardAuthCallback = async (navigationUrl) => {
-        if (!navigationUrl.includes("/__/auth/handler") || authCallbackHandled) {
+      if (url.includes(callbackUrl)) {
+        if (
+          url.includes("id_token") ||
+          url.includes("idToken") ||
+          url.includes("access_token") ||
+          url.includes("accessToken") ||
+          url.includes("code=")
+        ) {
+          authCallbackHandled = true;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("auth-callback", { url });
+          }
+          oauthWindow.close();
           return;
         }
 
-        for (let i = 0; i < 10; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 300));
+        try {
+          const bodyText = await oauthWindow.webContents.executeJavaScript(
+            "document.body ? document.body.innerText : ''",
+            true,
+          );
 
-          let fullUrl = navigationUrl;
-
-          try {
-            const evaluatedUrl = await oauthWindow.webContents.executeJavaScript(
-              "window.location.href",
-              true,
-            );
-            if (evaluatedUrl) {
-              fullUrl = evaluatedUrl;
-            }
-          } catch (error) {
-            break;
-          }
-
-          if (fullUrl.includes("id_token") || fullUrl.includes("access_token")) {
+          if (
+            bodyText &&
+            (bodyText.includes("idToken") || bodyText.includes("accessToken"))
+          ) {
             authCallbackHandled = true;
-            oauthWindow.close();
-            if (mainWindow) {
-              mainWindow.webContents.send("auth-callback", { url: fullUrl });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("auth-callback", { url, bodyText });
             }
+            oauthWindow.close();
             return;
           }
-        }
-      };
-
-      if (process.env.NODE_ENV === "development" || !app.isPackaged) {
-        oauthWindow.webContents.openDevTools();
+        } catch (e) {}
       }
+    } catch (error) {}
+  };
 
-      oauthWindow.loadURL(url);
+  oauthWindow.loadURL(url);
 
-      oauthWindow.webContents.on("page-title-updated", async (event) => {
-        const currentUrl = oauthWindow.webContents.getURL();
-        await forwardAuthCallback(currentUrl);
-      });
+  // Intercept navigation to detect POST callbacks.
+  oauthWindow.webContents.on("will-navigate", (event, navigationUrl) => {
+    if (authCallbackHandled) return;
 
-      oauthWindow.webContents.on("did-navigate", async (event, navUrl) => {
-        await forwardAuthCallback(navUrl);
-      });
+    if (navigationUrl.includes(callbackUrl)) {
+      // Check if URL has tokens.
+      if (
+        navigationUrl.includes("id_token") ||
+        navigationUrl.includes("access_token") ||
+        navigationUrl.includes("code=")
+      ) {
+        authCallbackHandled = true;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("auth-callback", { url: navigationUrl });
+        }
+        oauthWindow.close();
+      }
+    }
+  });
 
-      oauthWindow.webContents.on("did-navigate-in-page", async (event, navUrl) => {
-        await forwardAuthCallback(navUrl);
-      });
+  oauthWindow.webContents.on("did-finish-load", async () => {
+    if (authCallbackHandled) return;
 
-      oauthWindow.on("closed", () => {
-        oauthWindow = null;
-      });
+    try {
+      const currentUrl = await oauthWindow.webContents.executeJavaScript(
+        "window.location.href",
+        true,
+      );
 
-      return oauthWindow;
+      if (currentUrl.includes(callbackUrl)) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const authData = await oauthWindow.webContents.executeJavaScript(
+          `
+              (function() {
+                try {
+                  const hash = window.location.hash.substring(1);
+                  const search = window.location.search.substring(1);
+                  
+                  if (hash && (hash.includes('id_token') || hash.includes('code'))) {
+                    return window.location.href;
+                  }
+                  
+                  if (search && (search.includes('id_token') || search.includes('code'))) {
+                    return window.location.href;
+                  }
+                  
+                  // Check document title for success indicators.
+                  if (document.title && (document.title.includes('Success') || document.title.includes('Close'))) {
+                    try {
+                      const keys = Object.keys(localStorage);
+                      for (let key of keys) {
+                        const value = localStorage.getItem(key);
+                        if (value && (value.includes('idToken') || value.includes('id_token'))) {
+                          return value;
+                        }
+                      }
+                    } catch (e) {}
+                  }
+                  
+                  const bodyText = document.body ? document.body.innerText : '';
+                  
+                  if (bodyText.includes('Success') || bodyText.includes('You can now close')) {
+                    return '__AUTH_SUCCESS__'
+                  }
+                  
+                  return null;
+                } catch (e) {
+                  return null;
+                }
+              })()
+            `,
+          true,
+        );
+
+        if (authData) {
+          authCallbackHandled = true;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("auth-callback", {
+              url: authData === "__AUTH_SUCCESS__" ? currentUrl : authData,
+            });
+          }
+          oauthWindow.close();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Injection error:", e);
     }
 
-    /**
-     * Initializes app when Electron is ready.
-     */
-    app.whenReady().then(() => {
-      const savedAutoLaunch = store.get("autoLaunch", false);
-      syncAutoLaunch(savedAutoLaunch);
+    await checkForTokens();
 
-      // System audio capture handler - captures all system audio including:
-      // - Meet/Zoom calls (both parties), Bluetooth/wired devices, all apps
-      // Windows: automatic loopback | macOS: requires Screen Recording permission
-      session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-        desktopCapturer
-          .getSources({ types: ["screen"] })
-          .then((sources) => {
-            if (sources.length === 0) {
-              // Fallback: if no sources, still allow audio-only capture
-              callback({
-                video: null,
-                audio: process.platform === "win32" ? "loopback" : true,
-              });
-              return;
-            }
-
-            callback({
-              video: sources[0],
-              audio: process.platform === "win32" ? "loopback" : true,
-            });
-          })
-          .catch((error) => {
-            console.error("Desktop capturer failed:", error?.message || error);
-            // Allow audio-only capture even if video enumeration fails
-            callback({
-              video: null,
-              audio: process.platform === "win32" ? "loopback" : true,
-            });
-          });
-      });
-
-      createWindow();
-
-      /**
-       * Recreates window on macOS when dock icon is clicked.
-       */
-      app.on("activate", function () {
-        if (BrowserWindow.getAllWindows().length === 0) {
-          createWindow();
-        }
-      });
-    });
-
-    /**
-     * Quits app when all windows are closed (except on macOS).
-     */
-    app.on("window-all-closed", function () {
-      if (process.platform !== "darwin") {
-        app.quit();
+    const interval = setInterval(async () => {
+      if (authCallbackHandled || !oauthWindow || oauthWindow.isDestroyed()) {
+        clearInterval(interval);
+        return;
       }
-    });
+      await checkForTokens();
+    }, 500);
 
-    /**
-     * IPC handler: Opens OAuth window for authentication.
-     */
-    ipcMain.handle("open-oauth-window", async (event, { url, callbackUrl }) => {
-      return new Promise((resolve) => {
-        const oauthWin = createOAuthWindow(url, callbackUrl);
-        oauthWin.once("closed", () => {
-          resolve({ closed: true });
+    setTimeout(() => clearInterval(interval), 120000);
+  });
+
+  oauthWindow.webContents.on("did-navigate-in-page", checkForTokens);
+  oauthWindow.webContents.on("did-navigate", checkForTokens);
+
+  oauthWindow.on("closed", () => {
+    oauthWindow = null;
+  });
+
+  return oauthWindow;
+}
+
+/**
+ * Initializes app when Electron is ready.
+ */
+app.whenReady().then(async () => {
+  const savedAutoLaunch = store.get("autoLaunch", false);
+  syncAutoLaunch(savedAutoLaunch);
+
+  // System audio capture handler - captures all system audio including:
+  // - Meet/Zoom calls (both parties), Bluetooth/wired devices, all apps.
+  // Windows: automatic loopback | macOS: requires Screen Recording permission.
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    desktopCapturer
+      .getSources({ types: ["screen"] })
+      .then((sources) => {
+        if (sources.length === 0) {
+          // Fallback: if no sources, still allow audio-only capture.
+          callback({
+            video: null,
+            audio: process.platform === "win32" ? "loopback" : true,
+          });
+          return;
+        }
+
+        callback({
+          video: sources[0],
+          audio: process.platform === "win32" ? "loopback" : true,
+        });
+      })
+      .catch((error) => {
+        console.error("Desktop capturer failed:", error?.message || error);
+        // Allow audio-only capture even if video enumeration fails.
+        callback({
+          video: null,
+          audio: process.platform === "win32" ? "loopback" : true,
         });
       });
-    });
+  });
 
-    /**
-     * IPC handler: Gets value from persistent storage.
-     */
-    ipcMain.handle("get-storage", async (event, key) => {
-      return store.get(key, null);
-    });
+  createWindow();
 
-    /**
-     * IPC handler: Sets value in persistent storage.
-     */
-    ipcMain.handle("set-storage", async (event, key, value) => {
-      store.set(key, value);
-      return true;
-    });
+  /**
+   * Recreates window on macOS when dock icon is clicked.
+   */
+  app.on("activate", function () {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
 
-    /**
-     * IPC handler: Removes key from persistent storage.
-     */
-    ipcMain.handle("remove-storage", async (event, key) => {
-      store.delete(key);
-      return true;
-    });
+/**
+ * Quits app when all windows are closed (except on macOS).
+ */
+app.on("window-all-closed", function () {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
 
-    /**
-     * IPC handler: Sets theme preference and updates native theme.
-     */
-    ipcMain.handle("set-theme-preference", async (event, theme) => {
-      const normalized = theme === "dark" ? "dark" : "light";
-      store.set("theme", normalized);
-      nativeTheme.themeSource = normalized;
-      if (mainWindow) {
-        mainWindow.setBackgroundColor(
-          normalized === "dark" ? "#0a0a0a" : "#ffffff",
-        );
-      }
-      return true;
+/**
+ * IPC handler: Opens OAuth window for authentication.
+ */
+ipcMain.handle("open-oauth-window", async (event, { url, callbackUrl }) => {
+  return new Promise((resolve) => {
+    const oauthWin = createOAuthWindow(url, callbackUrl);
+    oauthWin.once("closed", () => {
+      resolve({ closed: true });
     });
+  });
+});
 
-    /**
-     * IPC handler: Gets available audio sources for system audio capture.
-     */
-    ipcMain.handle("get-audio-sources", async () => {
-      const sources = await mainWindow.webContents.getMediaSourceId({
-        audio: true,
-        video: false,
-      });
-      return sources;
-    });
+/**
+ * IPC handler: Gets value from persistent storage.
+ */
+ipcMain.handle("get-storage", async (event, key) => {
+  return store.get(key, null);
+});
 
-    /**
-     * IPC handler: Returns application version.
-     */
-    ipcMain.handle("get-app-version", () => {
-      return app.getVersion();
-    });
+/**
+ * IPC handler: Sets value in persistent storage.
+ */
+ipcMain.handle("set-storage", async (event, key, value) => {
+  store.set(key, value);
+  return true;
+});
 
-    /**
-     * IPC handler: Gets current auto-launch setting from system or storage.
-     */
-    ipcMain.handle("get-auto-launch", () => {
-      try {
-        const settings = app.getLoginItemSettings();
-        if (typeof settings?.openAtLogin === "boolean") {
-          return settings.openAtLogin || settings.openAsHidden || false;
-        }
-      } catch (error) {}
-      return store.get("autoLaunch", false);
-    });
+/**
+ * IPC handler: Removes key from persistent storage.
+ */
+ipcMain.handle("remove-storage", async (event, key) => {
+  store.delete(key);
+  return true;
+});
 
-    /**
-     * IPC handler: Sets auto-launch on system startup.
-     */
-    ipcMain.handle("set-auto-launch", (event, enabled) => {
-      syncAutoLaunch(!!enabled);
-      return !!enabled;
-    });
+/**
+ * IPC handler: Sets theme preference and updates native theme.
+ */
+ipcMain.handle("set-theme", (event, theme) => {
+  const normalized = theme === "dark" ? "dark" : "light";
+  store.set("theme", normalized);
+  nativeTheme.themeSource = normalized;
+  if (mainWindow) {
+    mainWindow.setBackgroundColor(
+      normalized === "dark" ? "#0a0a0a" : "#ffffff",
+    );
+  }
+  return true;
+});
+
+/**
+ * IPC handler: Gets available audio sources for system audio capture.
+ */
+ipcMain.handle("get-audio-sources", async () => {
+  const sources = await mainWindow.webContents.getMediaSourceId({
+    audio: true,
+    video: false,
+  });
+  return sources;
+});
+
+/**
+ * IPC handler: Returns application version.
+ */
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});
+
+/**
+ * IPC handler: Gets current auto-launch setting from system or storage.
+ */
+ipcMain.handle("get-auto-launch", () => {
+  try {
+    const settings = app.getLoginItemSettings();
+    if (typeof settings?.openAtLogin === "boolean") {
+      return settings.openAtLogin || settings.openAsHidden || false;
+    }
+  } catch (error) {}
+  return store.get("autoLaunch", false);
+});
+
+/**
+ * IPC handler: Sets auto-launch on system startup.
+ */
+ipcMain.handle("set-auto-launch", (event, enabled) => {
+  syncAutoLaunch(!!enabled);
+  return !!enabled;
+});

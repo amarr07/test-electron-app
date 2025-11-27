@@ -439,7 +439,9 @@ export function RemindersSection({
   );
 
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const actionsMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const shareMenuRef = useRef<HTMLDivElement | null>(null);
+  const shareMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const groupShareMenuRef = useRef<HTMLDivElement | null>(null);
 
   const todayStart = useMemo(() => {
@@ -861,37 +863,54 @@ export function RemindersSection({
   const formatTasksAsText = (tasksToFormat: Task[]) => {
     if (tasksToFormat.length === 0) return "No reminders to share.";
 
-    const grouped = tasksToFormat.reduce(
-      (acc, task) => {
-        const shareDate = resolveTaskDate(task);
-        const date = shareDate
-          ? shareDate.toLocaleDateString("en-US", {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            })
-          : "No date";
-        if (!acc[date]) acc[date] = [];
-        acc[date].push(task);
-        return acc;
-      },
-      {} as Record<string, Task[]>,
+    const pendingTasks = tasksToFormat.filter(
+      (task) => task.status !== "completed",
+    );
+    const completedTasks = tasksToFormat.filter(
+      (task) => task.status === "completed",
     );
 
-    let text = "📋 Reminders\n\n";
-    Object.entries(grouped).forEach(([date, dateTasks]) => {
-      text += `${date}\n`;
-      dateTasks.forEach((task) => {
-        const status = task.status === "completed" ? "✓" : "○";
-        const important = task.important ? " ⭐" : "";
-        text += `  ${status} ${task.task_name}${important}\n`;
-        if (task.details) {
-          text += `    ${task.details}\n`;
-        }
+    let text = "My Reminders\n\n";
+
+    if (pendingTasks.length > 0) {
+      text += "Pending Reminders\n\n";
+      pendingTasks.forEach((task, index) => {
+        text += `${index + 1}. ${task.task_name}\n`;
       });
       text += "\n";
+    }
+
+    if (completedTasks.length > 0) {
+      text += "Completed Reminders\n\n";
+      completedTasks.forEach((task, index) => {
+        text += `${index + 1}. ${task.task_name}\n`;
+      });
+      text += "\n";
+    }
+
+    text += "Summary\n\n";
+    text += `Total: ${tasksToFormat.length} reminder${
+      tasksToFormat.length !== 1 ? "s" : ""
+    }\n`;
+    text += `Pending: ${pendingTasks.length}\n`;
+    if (completedTasks.length > 0) {
+      text += `Completed: ${completedTasks.length}\n`;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
-    return text.trim();
+    const timeStr = now.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    text += `\nGenerated on ${dateStr} at ${timeStr}`;
+
+    return text;
   };
 
   /**
@@ -899,19 +918,22 @@ export function RemindersSection({
    */
   const formatTasksAsCSV = (tasksToFormat: Task[]) => {
     if (tasksToFormat.length === 0)
-      return "Task Name,Status,Important,Due Date,Details\n";
+      return "CONTENT,DESCRIPTION,DATE,DEADLINE,IMPORTANT\n";
 
-    const headers = "Task Name,Status,Important,Due Date,Details\n";
+    const headers = "CONTENT,DESCRIPTION,DATE,DEADLINE,IMPORTANT\n";
     const rows = tasksToFormat.map((task) => {
-      const name = `"${task.task_name.replace(/"/g, '""')}"`;
-      const status = task.status;
-      const important = task.important ? "Yes" : "No";
-      const shareDate = resolveTaskDate(task);
-      const dueDate = shareDate ? shareDate.toLocaleDateString("en-US") : "";
-      const details = task.details
+      const content = `"${task.task_name.replace(/"/g, '""')}"`;
+      const description = task.details
         ? `"${task.details.replace(/"/g, '""')}"`
         : "";
-      return `${name},${status},${important},${dueDate},${details}`;
+      const date = task.created_at
+        ? new Date(task.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "";
+      const deadline = task.due_date
+        ? new Date(task.due_date).toISOString().replace("T", " ").slice(0, 19)
+        : "";
+      const important = task.important ? "Yes" : "No";
+      return `${content},${description},${date},${deadline},${important}`;
     });
     return headers + rows.join("\n");
   };
@@ -1190,10 +1212,11 @@ export function RemindersSection({
   useEffect(() => {
     if (!actionsMenuOpen) return;
     const handleClick = (event: MouseEvent) => {
-      if (
-        actionsMenuRef.current &&
-        !actionsMenuRef.current.contains(event.target as Node)
-      ) {
+      const target = event.target as Node;
+      if (actionsMenuButtonRef.current?.contains(target)) {
+        return;
+      }
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(target)) {
         setActionsMenuOpen(false);
       }
     };
@@ -1204,10 +1227,11 @@ export function RemindersSection({
   useEffect(() => {
     if (!shareMenuOpen) return;
     const handleClick = (event: MouseEvent) => {
-      if (
-        shareMenuRef.current &&
-        !shareMenuRef.current.contains(event.target as Node)
-      ) {
+      const target = event.target as Node;
+      if (shareMenuButtonRef.current?.contains(target)) {
+        return;
+      }
+      if (shareMenuRef.current && !shareMenuRef.current.contains(target)) {
         setShareMenuOpen(false);
       }
     };
@@ -1530,8 +1554,12 @@ export function RemindersSection({
             <div className="relative flex items-center gap-2">
               <div className="relative flex items-center gap-2">
                 <button
+                  ref={shareMenuButtonRef}
                   type="button"
-                  onClick={() => setShareMenuOpen((prev) => !prev)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShareMenuOpen((prev) => !prev);
+                  }}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted transition hover:border-foreground hover:text-foreground"
                   aria-label="Share reminders"
                 >
@@ -1619,10 +1647,14 @@ export function RemindersSection({
                 )}
               </div>
               <button
+                ref={actionsMenuButtonRef}
                 type="button"
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted transition hover:border-foreground hover:text-foreground"
                 aria-label="Reminders actions"
-                onClick={() => setActionsMenuOpen((prev) => !prev)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActionsMenuOpen((prev) => !prev);
+                }}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>

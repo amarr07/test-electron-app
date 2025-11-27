@@ -31,7 +31,6 @@ export function MemorySearchBar({
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const previousTextRef = useRef("");
   const lastTextLengthRef = useRef(0);
-  const isRestoringTextRef = useRef(false);
   const isActive = isFocused || submittedQuery.length > 0 || isSearchingState;
 
   /**
@@ -115,13 +114,12 @@ export function MemorySearchBar({
 
   /**
    * Handles input changes with autocomplete integration.
-   * Manages deletion (restores previous text), insertion (updates suggestion),
+   * Manages deletion (clears suggestion), insertion (updates suggestion),
    * and debounced autocomplete fetching.
    */
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
-      const previousText = previousTextRef.current;
       const previousLength = lastTextLengthRef.current;
       const isDeletion = value.length < previousLength;
       const isInsertion = value.length > previousLength;
@@ -130,23 +128,8 @@ export function MemorySearchBar({
         clearTimeout(debounceTimerRef.current);
       }
 
-      if (isRestoringTextRef.current) {
-        isRestoringTextRef.current = false;
-        previousTextRef.current = value;
-        lastTextLengthRef.current = value.length;
-        return;
-      }
-
       if (isDeletion && autocompleteSuggestion.length > 0) {
         setAutocompleteSuggestion("");
-        isRestoringTextRef.current = true;
-        if (inputRef.current) {
-          inputRef.current.value = previousText;
-          const event = new Event("input", { bubbles: true });
-          inputRef.current.dispatchEvent(event);
-          inputRef.current.setSelectionRange(previousLength, previousLength);
-        }
-        return;
       }
 
       if (isInsertion && autocompleteSuggestion.length > 0) {
