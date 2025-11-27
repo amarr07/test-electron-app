@@ -11,7 +11,7 @@ import { storage } from "@/lib/storage";
 import { formatElapsed } from "@/lib/time";
 import { useNotifications } from "@/providers/NotificationProvider";
 import { useToast } from "@/providers/ToastProvider";
-import { Pause, Play, Square } from "lucide-react";
+import { CalendarRange, Pause, Play, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface CalendarEventsProps {
@@ -335,88 +335,88 @@ export function CalendarEvents({
     [activeEventId, pauseTimer, resetTimer, saveTimerState],
   );
 
-  const handleAutoStart = useCallback(
-    (event: CalendarEvent) => {
-      if (activeEventId === event.id && eventTimerState !== "idle") {
-        return;
-      }
-      if (recorderStatus && recorderStatus !== "idle") {
-        return;
-      }
-      if (isManuallyStopped(event.id)) {
-        return;
-      }
-      startEventTimer(event.id);
-    },
-    [
-      activeEventId,
-      eventTimerState,
-      isManuallyStopped,
-      recorderStatus,
-      startEventTimer,
-    ],
-  );
+  // const handleAutoStart = useCallback(
+  //   (event: CalendarEvent) => {
+  //     if (activeEventId === event.id && eventTimerState !== "idle") {
+  //       return;
+  //     }
+  //     if (recorderStatus && recorderStatus !== "idle") {
+  //       return;
+  //     }
+  //     if (isManuallyStopped(event.id)) {
+  //       return;
+  //     }
+  //     startEventTimer(event.id);
+  //   },
+  //   [
+  //     activeEventId,
+  //     eventTimerState,
+  //     isManuallyStopped,
+  //     recorderStatus,
+  //     startEventTimer,
+  //   ],
+  // );
 
-  const handleAutoStop = useCallback(
-    (eventId: string) => {
-      if (activeEventId !== eventId) {
-        return;
-      }
-      stopEventTimer(eventId);
-    },
-    [activeEventId, stopEventTimer],
-  );
+  // const handleAutoStop = useCallback(
+  //   (eventId: string) => {
+  //     if (activeEventId !== eventId) {
+  //       return;
+  //     }
+  //     stopEventTimer(eventId);
+  //   },
+  //   [activeEventId, stopEventTimer],
+  // );
 
-  useEffect(() => {
-    const checkEvents = () => {
-      const activeEvent = findActiveEvent();
-      if (activeEvent) {
-        if (
-          (activeEventId !== activeEvent.id || eventTimerState === "idle") &&
-          (!recorderStatus || recorderStatus === "idle")
-        ) {
-          handleAutoStart(activeEvent);
-        }
-      } else {
-        if (activeEventId && eventTimerState !== "idle") {
-          handleAutoStop(activeEventId);
-        }
-        const allEvents = getAllEvents();
-        allEvents.forEach((event) => {
-          if (!isEventActive(event)) {
-            removeManuallyStoppedEvent(event.id);
-          }
-        });
-      }
-      if (activeEventId) {
-        const allEvents = getAllEvents();
-        const currentEvent = allEvents.find((e) => e.id === activeEventId);
-        if (currentEvent && !isEventActive(currentEvent)) {
-          handleAutoStop(activeEventId);
-          removeManuallyStoppedEvent(activeEventId);
-        }
-      }
-    };
-
-    checkEvents();
-    autoStartCheckIntervalRef.current = setInterval(checkEvents, 10000);
-
-    return () => {
-      if (autoStartCheckIntervalRef.current) {
-        clearInterval(autoStartCheckIntervalRef.current);
-      }
-    };
-  }, [
-    activeEventId,
-    eventTimerState,
-    findActiveEvent,
-    getAllEvents,
-    handleAutoStart,
-    handleAutoStop,
-    isEventActive,
-    recorderStatus,
-    removeManuallyStoppedEvent,
-  ]);
+  // useEffect(() => {
+  //   const checkEvents = () => {
+  //     const activeEvent = findActiveEvent();
+  //     if (activeEvent) {
+  //       if (
+  //         (activeEventId !== activeEvent.id || eventTimerState === "idle") &&
+  //         (!recorderStatus || recorderStatus === "idle")
+  //       ) {
+  //         handleAutoStart(activeEvent);
+  //       }
+  //     } else {
+  //       if (activeEventId && eventTimerState !== "idle") {
+  //         handleAutoStop(activeEventId);
+  //       }
+  //       const allEvents = getAllEvents();
+  //       allEvents.forEach((event) => {
+  //         if (!isEventActive(event)) {
+  //           removeManuallyStoppedEvent(event.id);
+  //         }
+  //       });
+  //     }
+  //     if (activeEventId) {
+  //       const allEvents = getAllEvents();
+  //       const currentEvent = allEvents.find((e) => e.id === activeEventId);
+  //       if (currentEvent && !isEventActive(currentEvent)) {
+  //         handleAutoStop(activeEventId);
+  //         removeManuallyStoppedEvent(activeEventId);
+  //       }
+  //     }
+  //   };
+  //
+  //   checkEvents();
+  //   autoStartCheckIntervalRef.current = setInterval(checkEvents, 10000);
+  //
+  //   return () => {
+  //     if (autoStartCheckIntervalRef.current) {
+  //       clearInterval(autoStartCheckIntervalRef.current);
+  //     }
+  //   };
+  // }, [
+  //   activeEventId,
+  //   eventTimerState,
+  //   findActiveEvent,
+  //   getAllEvents,
+  //   handleAutoStart,
+  //   handleAutoStop,
+  //   isEventActive,
+  //   recorderStatus,
+  //   removeManuallyStoppedEvent,
+  // ]);
 
   useEffect(() => {
     if (activeEventId === null && eventTimerState !== "idle") {
@@ -591,8 +591,18 @@ export function CalendarEvents({
   if (filteredEvents.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-muted/60 text-sm">
-          {searchQuery ? "No events found" : "No upcoming events"}
+        <div className="flex flex-col items-center text-center space-y-3 text-muted/70">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0f8b54]/10 text-[#0f8b54] shadow-inner">
+            <CalendarRange className="h-6 w-6" />
+          </span>
+          <p className="text-sm font-semibold text-foreground">
+            {searchQuery ? "No events found" : "No upcoming events"}
+          </p>
+          {!searchQuery && (
+            <p className="text-xs text-muted max-w-xs">
+              Connect your Google Calendar or create a new event to see it here.
+            </p>
+          )}
         </div>
       </div>
     );

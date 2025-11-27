@@ -19,6 +19,7 @@ import {
   ChevronDown,
   HelpCircle,
   LogOut,
+  Mic,
   MonitorSmartphone,
   Pencil,
   Plus,
@@ -631,6 +632,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     </button>
   );
 
+  const voiceProfileSteps = [
+    {
+      title: "Ensure you're in a quiet place",
+      description:
+        "Recording in a quiet space ensures better voice recognition accuracy.",
+    },
+    {
+      title: "Speak clearly, at your natural pace.",
+      description: "Talk continuously for 30 seconds for better accuracy.",
+    },
+  ];
+
   const sections = [
     {
       id: "general",
@@ -688,8 +701,64 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       ),
     },
     {
+      id: "voiceProfile",
+      label: "Voice Profile",
+      icon: Mic,
+      content: (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-[#d0d0d0] dark:border-[#404040] bg-surface p-6 shadow-sm space-y-5">
+            <div className="space-y-2 text-center">
+              <p className="text-sm font-semibold text-[#0f8b54]">
+                Setup Voice Profile
+              </p>
+              <p className="text-xs text-muted">
+                Speech samples of your voice will be created to setup the
+                profile.
+              </p>
+            </div>
+
+            <div className="border-t border-dashed border-border/70" />
+
+            <div className="space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0f8b54] text-center">
+                How to setup your profile?
+              </p>
+              <div className="space-y-3">
+                {voiceProfileSteps.map((step) => (
+                  <div
+                    key={step.title}
+                    className="flex gap-3 rounded-2xl border border-[#d0d0d0] dark:border-[#404040] bg-surface shadow-sm px-4 py-3"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#0f8b54]/10 text-[#0f8b54]">
+                      <Mic className="h-4 w-4" />
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-foreground">
+                        {step.title}
+                      </p>
+                      <p className="text-xs text-muted">{step.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted text-center">
+                This might take you 30-60 seconds to complete
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="w-full rounded-full bg-[#0f8b54] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#0d6b42]"
+            >
+              Got it! Let's Start
+            </button>
+          </div>
+        </div>
+      ),
+    },
+    {
       id: "profile",
-      label: "Profile",
+      label: "Personal Details",
       icon: UserRound,
       content: (
         <div className="space-y-4">
