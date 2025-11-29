@@ -491,6 +491,7 @@ class AuthManager {
 
       await firebaseSignOut(this.auth);
       await storage.clearSessionData();
+      await storage.removeAuthToken();
       this.currentUser = null;
       if (this.onAuthStateChangedCallback) {
         this.onAuthStateChangedCallback(null);

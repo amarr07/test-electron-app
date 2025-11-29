@@ -53,6 +53,12 @@ export async function getValidAuthToken(
   const { forceRefresh = false, purpose } = options;
   const authError = buildAuthErrorMessage(purpose);
 
+  const currentUser = await authManager.getCurrentUser();
+  if (!currentUser) {
+    await storage.removeAuthToken();
+    throw new Error(authError);
+  }
+
   if (!forceRefresh) {
     const cached = await storage.getAuthToken();
     if (cached && isTokenValid(cached)) {

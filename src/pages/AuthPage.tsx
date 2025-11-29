@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useAuthContext } from "@/providers/AuthProvider";
 import { useToast } from "@/providers/ToastProvider";
 import { Check, Info } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import logoBlack from "../../assets/neosapien-black.svg";
 import logoWhite from "../../assets/neosapien-white.svg";
 
@@ -23,56 +23,7 @@ export function AuthPage() {
   );
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
-  const hasShownErrorRef = useRef(false);
-  const isSigningOutRef = useRef(false);
-  const {
-    signInWithGoogle,
-    signInWithApple,
-    checksError,
-    hasBackendAccount,
-    user,
-    signOut,
-    checking,
-  } = useAuthContext();
-
-  // Show error and sign out if checks failed (only once per session)
-  useEffect(() => {
-    if (!user) {
-      // Reset flags when user signs out
-      hasShownErrorRef.current = false;
-      isSigningOutRef.current = false;
-      return;
-    }
-
-    // Don't do anything while still checking
-    if (checking) {
-      return;
-    }
-
-    // If already handled this error or currently signing out, don't do it again
-    if (hasShownErrorRef.current || isSigningOutRef.current) {
-      return;
-    }
-
-    // If checks failed or no backend account, show error and sign out
-    if (checksError || !hasBackendAccount) {
-      hasShownErrorRef.current = true;
-      isSigningOutRef.current = true;
-
-      const message = checksError
-        ? checksError
-        : "No account found. Please contact support to create an account before signing in.";
-
-      toast({
-        title: checksError ? "Account verification failed" : "No account found",
-        description: message,
-        variant: "destructive",
-      });
-
-      // Sign out immediately
-      signOut();
-    }
-  }, [user, checking, checksError, hasBackendAccount, toast, signOut]);
+  const { signInWithGoogle, signInWithApple } = useAuthContext();
 
   /**
    * Handles Google OAuth sign-in with loading state and error handling.
