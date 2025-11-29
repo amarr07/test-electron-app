@@ -307,3 +307,45 @@ export async function bulkUpdateTasks(
   const parsed = await response.json();
   return parsed.data || parsed;
 }
+
+/**
+ * Delete tasks by date range (for Today/Yesterday/Earlier sections).
+ * Uses DELETE /tasks/range endpoint.
+ */
+export async function deleteTasksByDateRange({
+  startDate,
+  endDate,
+  importantOnly = false,
+}: {
+  startDate: string;
+  endDate: string;
+  importantOnly?: boolean;
+}): Promise<void> {
+  const backendUrl = config.BACKEND_URL;
+  if (!backendUrl) {
+    throw new Error("Backend URL is not configured.");
+  }
+
+  const response = await authorizedFetch(
+    `${backendUrl}/tasks/range`,
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        start_date: startDate,
+        end_date: endDate,
+        important_only: importantOnly,
+      }),
+    },
+    { purpose: "delete reminders by date range" },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to delete tasks by date range: ${text || response.statusText}`,
+    );
+  }
+}

@@ -3,7 +3,7 @@ import {
   Task,
   TaskStatus,
   createTask,
-  deleteTask,
+  deleteTasksByDateRange,
   getTasks,
   updateTask,
 } from "@/api/reminders";
@@ -79,14 +79,11 @@ function normalizeToLocalDate(dateStr: string): Date | null {
 
 /**
  * Gets date for task categorization (today/yesterday/earlier).
- * Prioritizes memory creation date, then due date, then task creation date.
+ * Uses memory creation date if available, otherwise task creation date.
+ * Does not use due_date for categorization (matches Flutter app behavior).
  */
 function getTaskCategorizationDate(task: Task, todayStart: Date): Date {
-  const dateSources = [
-    task.memory_details?.[0]?.created_at,
-    task.due_date,
-    task.created_at,
-  ];
+  const dateSources = [task.memory_details?.[0]?.created_at, task.created_at];
 
   for (const dateStr of dateSources) {
     if (!dateStr) continue;
@@ -938,13 +935,117 @@ export function RemindersSection({
       }
 
       try {
-        await Promise.all(sectionTasks.map((task) => deleteTask(task.id)));
+        const now = new Date();
+        const today = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+        );
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const dayBeforeYesterday = new Date(today);
+        dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+
+        let startDate: Date;
+        let endDate: Date;
+
+        if (sectionKey === "today") {
+          startDate = today;
+          endDate = new Date(
+            today.getFullYear(),
+            today.getMonth(),
+            today.getDate(),
+            23,
+            59,
+            59,
+          );
+        } else if (sectionKey === "yesterday") {
+          startDate = yesterday;
+          endDate = new Date(
+            yesterday.getFullYear(),
+            yesterday.getMonth(),
+            yesterday.getDate(),
+            23,
+            59,
+            59,
+          );
+        } else {
+          startDate = new Date(2025, 0, 1);
+          endDate = new Date(
+            dayBeforeYesterday.getFullYear(),
+            dayBeforeYesterday.getMonth(),
+            dayBeforeYesterday.getDate(),
+            23,
+            59,
+            59,
+          );
+        }
+
+        const allTasks = allTasksData.flatMap((group) => group.tasks);
+        let tasksToRemove = allTasks.filter((task) => {
+          const taskDate = getTaskCategorizationDate(task, today);
+          const taskDateNormalized = new Date(
+            taskDate.getFullYear(),
+            taskDate.getMonth(),
+            taskDate.getDate(),
+          );
+          const startDateNormalized = new Date(
+            startDate.getFullYear(),
+            startDate.getMonth(),
+            startDate.getDate(),
+          );
+          const endDateNormalized = new Date(
+            endDate.getFullYear(),
+            endDate.getMonth(),
+            endDate.getDate(),
+          );
+          return (
+            taskDateNormalized >= startDateNormalized &&
+            taskDateNormalized <= endDateNormalized
+          );
+        });
+
+        if (activeTab === "important") {
+          tasksToRemove = tasksToRemove.filter((task) => task.important);
+        }
+
+        setCategorizedSections((prev) => {
+          return prev
+            .map((s) => {
+              if (s.key !== sectionKey) return s;
+              return {
+                ...s,
+                groups: [],
+              };
+            })
+            .filter((s) => s.groups.length > 0 || s.key !== sectionKey);
+        });
+
+        setAllTasksData((prev) => {
+          const taskIdsToRemove = new Set(tasksToRemove.map((t) => t.id));
+          return prev
+            .map((group) => ({
+              ...group,
+              tasks: group.tasks.filter(
+                (task) => !taskIdsToRemove.has(task.id),
+              ),
+            }))
+            .filter((group) => group.tasks.length > 0);
+        });
+
+        await deleteTasksByDateRange({
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+          importantOnly: activeTab === "important",
+        });
+
         await loadTasks();
         toast({
           title: "Reminders deleted",
           description: `${sectionTasks.length} reminder${sectionTasks.length !== 1 ? "s" : ""} removed.`,
         });
       } catch (error: any) {
+        await loadTasks();
         toast({
           title: "Unable to delete reminders",
           description: error?.message || "Try again.",
@@ -952,7 +1053,7 @@ export function RemindersSection({
         });
       }
     },
-    [categorizedSections, loadTasks, toast],
+    [categorizedSections, allTasksData, activeTab, loadTasks, toast],
   );
 
   const toggleGroupCollapse = (groupKey: string) => {

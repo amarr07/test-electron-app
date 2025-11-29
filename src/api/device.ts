@@ -128,6 +128,7 @@ export async function hasAnyPairedDevice(): Promise<boolean> {
 
 /**
  * Verify if the authenticated user has a backend account.
+ * Forces token refresh to avoid using stale tokens from previous users.
  */
 export async function checkUserHasBackendAccount(): Promise<boolean> {
   const backendUrl = config.BACKEND_URL;
@@ -144,6 +145,7 @@ export async function checkUserHasBackendAccount(): Promise<boolean> {
       {
         purpose: "verify account",
         retryOnAuthError: false,
+        forceRefresh: true,
       },
     );
 
