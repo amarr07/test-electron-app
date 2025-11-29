@@ -53,20 +53,17 @@ export function useAuth() {
 
   const signInWithEmail = useCallback(
     async (email: string, password: string) => {
-      const user = await authManager.signInWithEmail(email, password);
-      return user;
+      return await authManager.signInWithEmail(email, password);
     },
     [],
   );
 
   const signInWithGoogle = useCallback(async () => {
-    const user = await authManager.signInWithGoogle();
-    return user;
+    return await authManager.signInWithGoogle();
   }, []);
 
   const signInWithApple = useCallback(async () => {
-    const user = await authManager.signInWithApple();
-    return user;
+    return await authManager.signInWithApple();
   }, []);
 
   const signOut = useCallback(async () => {

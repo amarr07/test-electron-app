@@ -29,8 +29,6 @@ export function MemorySearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRequestIdRef = useRef(0);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const previousTextRef = useRef("");
-  const lastTextLengthRef = useRef(0);
   const isActive = isFocused || submittedQuery.length > 0 || isSearchingState;
 
   /**
@@ -46,60 +44,16 @@ export function MemorySearchBar({
       }
 
       const requestId = ++autocompleteRequestIdRef.current;
-      const queryAtRequestTime = trimmedQuery;
-
       try {
-        const suggestions =
-          await getMemorySearchAutosuggestions(queryAtRequestTime);
+        const suggestions = await getMemorySearchAutosuggestions(trimmedQuery);
 
         if (requestId !== autocompleteRequestIdRef.current) {
           return;
         }
 
-        const currentText = inputRef.current?.value || searchQuery;
-        const currentTextTrimmed = currentText.trim();
-
-        if (
-          currentTextTrimmed.length === 0 ||
-          currentTextTrimmed.length < queryAtRequestTime.length
-        ) {
-          setAutocompleteSuggestion("");
-          return;
-        }
-
-        const currentLower = currentTextTrimmed.toLowerCase();
-        const queryLower = queryAtRequestTime.toLowerCase();
-
-        if (!currentLower.startsWith(queryLower)) {
-          setAutocompleteSuggestion("");
-          return;
-        }
-
         if (suggestions.length > 0) {
-          let bestMatch: string | null = null;
-
-          for (const suggestion of suggestions) {
-            const suggestionLower = suggestion.toLowerCase();
-
-            if (
-              suggestionLower.startsWith(currentLower) &&
-              suggestion.length > currentTextTrimmed.length
-            ) {
-              const remainingText = suggestion.substring(
-                currentTextTrimmed.length,
-              );
-              if (remainingText.length > 0) {
-                bestMatch = remainingText;
-                break;
-              }
-            }
-          }
-
-          if (bestMatch) {
-            setAutocompleteSuggestion(bestMatch);
-          } else {
-            setAutocompleteSuggestion("");
-          }
+          // Use backend suggestion as-is, no custom spacing logic.
+          setAutocompleteSuggestion(suggestions[0]);
         } else {
           setAutocompleteSuggestion("");
         }
@@ -120,44 +74,11 @@ export function MemorySearchBar({
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
-      const previousLength = lastTextLengthRef.current;
-      const isDeletion = value.length < previousLength;
-      const isInsertion = value.length > previousLength;
-
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
 
-      if (isDeletion && autocompleteSuggestion.length > 0) {
-        setAutocompleteSuggestion("");
-      }
-
-      if (isInsertion && autocompleteSuggestion.length > 0) {
-        const insertedText = value.substring(previousLength);
-        if (insertedText.length > 0) {
-          const suggestionLower = autocompleteSuggestion.toLowerCase();
-          const insertedLower = insertedText.toLowerCase();
-          if (
-            suggestionLower.startsWith(insertedLower) &&
-            autocompleteSuggestion.length >= insertedText.length
-          ) {
-            const remainingSuggestion = autocompleteSuggestion.substring(
-              insertedText.length,
-            );
-            if (remainingSuggestion.length === 0) {
-              setAutocompleteSuggestion("");
-            } else {
-              setAutocompleteSuggestion(remainingSuggestion);
-            }
-          } else {
-            setAutocompleteSuggestion("");
-          }
-        }
-      }
-
       setSearchQuery(value);
-      previousTextRef.current = value;
-      lastTextLengthRef.current = value.length;
 
       if (value.trim().length >= 3) {
         debounceTimerRef.current = setTimeout(() => {
@@ -196,18 +117,15 @@ export function MemorySearchBar({
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (autocompleteSuggestion.length > 0) {
-        const newText = searchQuery + autocompleteSuggestion;
-        setSearchQuery(newText);
-        previousTextRef.current = newText;
-        lastTextLengthRef.current = newText.length;
-        setAutocompleteSuggestion("");
-        setTimeout(() => {
-          handleSearch(newText);
-        }, 50);
-      } else {
-        handleSearch(searchQuery);
-      }
+      const finalQuery =
+        autocompleteSuggestion.length > 0
+          ? autocompleteSuggestion
+          : searchQuery;
+      setSearchQuery(finalQuery);
+      setAutocompleteSuggestion("");
+      setTimeout(() => {
+        handleSearch(finalQuery);
+      }, 50);
       inputRef.current?.blur();
     },
     [searchQuery, autocompleteSuggestion, handleSearch],
@@ -216,8 +134,6 @@ export function MemorySearchBar({
   const handleClear = useCallback(() => {
     setSearchQuery("");
     setAutocompleteSuggestion("");
-    previousTextRef.current = "";
-    lastTextLengthRef.current = 0;
     setIsSearchingState(false);
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -234,17 +150,15 @@ export function MemorySearchBar({
    */
   const acceptAutocomplete = useCallback(() => {
     if (autocompleteSuggestion.length > 0) {
-      const newText = searchQuery + autocompleteSuggestion;
+      const newText = autocompleteSuggestion;
       setSearchQuery(newText);
-      previousTextRef.current = newText;
-      lastTextLengthRef.current = newText.length;
       setAutocompleteSuggestion("");
       if (inputRef.current) {
         inputRef.current.value = newText;
         inputRef.current.setSelectionRange(newText.length, newText.length);
       }
     }
-  }, [searchQuery, autocompleteSuggestion]);
+  }, [autocompleteSuggestion]);
 
   const handleInputClick = useCallback(() => {
     acceptAutocomplete();
@@ -278,6 +192,17 @@ export function MemorySearchBar({
 
   const [inputWidth, setInputWidth] = useState(0);
   const measureRef = useRef<HTMLSpanElement>(null);
+
+  // Compute just the suffix to visually render after the typed query.
+  const autocompleteSuffix = (() => {
+    if (!autocompleteSuggestion || !searchQuery) return "";
+    const suggestionLower = autocompleteSuggestion.toLowerCase();
+    const queryLower = searchQuery.toLowerCase();
+    if (!suggestionLower.startsWith(queryLower)) {
+      return "";
+    }
+    return autocompleteSuggestion.substring(searchQuery.length);
+  })();
 
   /**
    * Measures typed text width using hidden span to position autocomplete suggestion.
@@ -339,14 +264,14 @@ export function MemorySearchBar({
               left: "-9999px",
             }}
           />
-          {autocompleteSuggestion.length > 0 && searchQuery.length > 0 && (
+          {autocompleteSuffix.length > 0 && searchQuery.length > 0 && (
             <div
               className="absolute top-1/2 -translate-y-1/2 pointer-events-none text-xs text-muted/60"
               style={{
                 left: `${36 + inputWidth}px`,
               }}
             >
-              {autocompleteSuggestion}
+              {autocompleteSuffix}
             </div>
           )}
         </div>

@@ -32,6 +32,20 @@ class Storage {
     return await this.remove("authToken");
   }
 
+  async clearSessionData(): Promise<void> {
+    const keysToClear = [
+      "authToken",
+      "authDisplayName",
+      "timer_state",
+      "reminderSettings",
+      "googleAccessToken",
+      "googleAccessTokenExpiresAt",
+    ];
+
+    await Promise.all(keysToClear.map((key) => this.remove(key)));
+    await this.clearGoogleAccessToken();
+  }
+
   /**
    * Stores Google access token with optional expiry (1 minute buffer).
    */

@@ -37,6 +37,8 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
   const [memoryRefreshVersion, setMemoryRefreshVersion] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const transcribingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Track processed event IDs to prevent duplicate toasts
+  const processedEventIdsRef = useRef<Set<string>>(new Set());
 
   const clearTranscribingTimeout = useCallback(() => {
     if (transcribingTimeoutRef.current) {
@@ -82,6 +84,19 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
 
   const handleEvent = useCallback(
     (event: UserEventRecord) => {
+      // Check if we've already processed this event to prevent duplicate toasts
+      const eventKey = `${event.id}-${event.event}`;
+      const shouldShowToast = !processedEventIdsRef.current.has(eventKey);
+
+      // Mark event as processed
+      processedEventIdsRef.current.add(eventKey);
+
+      // Clean up old processed IDs (keep only last 100 to prevent memory leak)
+      if (processedEventIdsRef.current.size > 100) {
+        const idsArray = Array.from(processedEventIdsRef.current);
+        processedEventIdsRef.current = new Set(idsArray.slice(-50));
+      }
+
       switch (event.event) {
         case "in_progress": {
           if (!isStaleEvent(event, TRANSCRIBING_EVENT_TTL_MS)) {
@@ -104,39 +119,51 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
           disableProcessing();
           disableTranscribing();
           setMemoryRefreshVersion((version) => version + 1);
-          toast({
-            title: "Memory created",
-            description: "We’re updating your timeline.",
-          });
+          // Only show toast if we haven't processed this event before
+          if (shouldShowToast) {
+            toast({
+              title: "Memory created",
+              description: "We're updating your timeline.",
+            });
+          }
           break;
         }
         case "post_completed": {
           disableProcessing();
           disableTranscribing();
           setMemoryRefreshVersion((version) => version + 1);
-          toast({
-            title: "Memory updated",
-            description: "Enhancements are ready.",
-          });
+          // Only show toast if we haven't processed this event before
+          if (shouldShowToast) {
+            toast({
+              title: "Memory updated",
+              description: "Enhancements are ready.",
+            });
+          }
           break;
         }
         case "failed": {
           disableProcessing();
           disableTranscribing();
-          toast({
-            title: "Memory processing failed",
-            description: "Try recording again.",
-            variant: "destructive",
-          });
+          // Only show toast if we haven't processed this event before
+          if (shouldShowToast) {
+            toast({
+              title: "Memory processing failed",
+              description: "Try recording again.",
+              variant: "destructive",
+            });
+          }
           break;
         }
         default: {
           if (event.event.includes("archived")) {
-            toast({
-              title: "Memory archived",
-              description: "Your list has been updated.",
-            });
             setMemoryRefreshVersion((version) => version + 1);
+            // Only show toast if we haven't processed this event before
+            if (shouldShowToast) {
+              toast({
+                title: "Memory archived",
+                description: "Your list has been updated.",
+              });
+            }
           }
         }
       }

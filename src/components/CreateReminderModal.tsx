@@ -139,7 +139,7 @@ export function CreateReminderModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[520px] rounded-[32px] border border-border/80 bg-surface shadow-[0_40px_80px_rgba(15,23,42,0.18)] overflow-visible"
+        className="w-full max-w-[520px] rounded-[32px] border border-border/80 bg-surface shadow-[0_32px_70px_rgba(15,23,42,0.35)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border/70 px-6 py-5">

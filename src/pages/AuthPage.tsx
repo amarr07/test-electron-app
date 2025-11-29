@@ -72,10 +72,10 @@ export function AuthPage() {
   };
 
   return (
-    <div className="theme-auth w-full h-full flex items-center justify-center relative overflow-hidden bg-background">
+    <div className="theme-auth w-full h-full flex items-center justify-center relative overflow-hidden bg-background window-drag-region">
       <div className="absolute inset-0 bg-gradient-to-t from-primary/20 via-surface/40 to-transparent" />
 
-      <div className="relative z-10 flex flex-col items-center gap-2 max-w-[420px] w-full px-8 py-10">
+      <div className="relative z-10 flex flex-col items-center gap-2 max-w-[420px] w-full px-8 py-10 window-no-drag">
         <img
           src={
             document.documentElement.classList.contains("dark")
@@ -175,7 +175,7 @@ export function AuthPage() {
 
       {showTermsModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3 window-no-drag"
           onClick={() => setShowTermsModal(false)}
         >
           <div

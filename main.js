@@ -215,7 +215,7 @@ function createOAuthWindow(url, callbackUrl) {
         true,
       );
 
-      if (url.includes(callbackUrl)) {
+      if (url.startsWith(callbackUrl)) {
         if (
           url.includes("id_token") ||
           url.includes("idToken") ||
@@ -255,28 +255,9 @@ function createOAuthWindow(url, callbackUrl) {
 
   oauthWindow.loadURL(url);
 
-  // Intercept navigation to detect POST callbacks.
-  oauthWindow.webContents.on("will-navigate", (event, navigationUrl) => {
-    if (authCallbackHandled) return;
-
-    if (navigationUrl.includes(callbackUrl)) {
-      // Check if URL has tokens.
-      if (
-        navigationUrl.includes("id_token") ||
-        navigationUrl.includes("access_token") ||
-        navigationUrl.includes("code=")
-      ) {
-        authCallbackHandled = true;
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("auth-callback", { url: navigationUrl });
-        }
-        oauthWindow.close();
-      }
-    }
-  });
-
   oauthWindow.webContents.on("did-finish-load", async () => {
-    if (authCallbackHandled) return;
+    if (authCallbackHandled || !oauthWindow || oauthWindow.isDestroyed())
+      return;
 
     try {
       const currentUrl = await oauthWindow.webContents.executeJavaScript(
@@ -286,6 +267,7 @@ function createOAuthWindow(url, callbackUrl) {
 
       if (currentUrl.includes(callbackUrl)) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (!oauthWindow || oauthWindow.isDestroyed()) return;
         const authData = await oauthWindow.webContents.executeJavaScript(
           `
               (function() {
@@ -336,7 +318,9 @@ function createOAuthWindow(url, callbackUrl) {
               url: authData === "__AUTH_SUCCESS__" ? currentUrl : authData,
             });
           }
-          oauthWindow.close();
+          if (oauthWindow && !oauthWindow.isDestroyed()) {
+            oauthWindow.close();
+          }
           return;
         }
       }
@@ -344,6 +328,7 @@ function createOAuthWindow(url, callbackUrl) {
       console.error("Injection error:", e);
     }
 
+    if (!oauthWindow || oauthWindow.isDestroyed()) return;
     await checkForTokens();
 
     const interval = setInterval(async () => {

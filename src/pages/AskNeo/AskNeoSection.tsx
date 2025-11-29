@@ -58,6 +58,7 @@ export function AskNeoSection({
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [dynamicPrompts, setDynamicPrompts] = useState<DynamicPrompt[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(false);
+  const [cacheChecked, setCacheChecked] = useState(false);
   const promptsLoadedRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -223,8 +224,16 @@ export function AskNeoSection({
       setSessions([]);
     } finally {
       setLoadingSessions(false);
+      setCacheChecked(true);
     }
   }, [toast]);
+
+  // Mark cache as checked after mount
+  useEffect(() => {
+    if (sessions.length > 0) {
+      setCacheChecked(true);
+    }
+  }, [sessions.length]);
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -645,11 +654,7 @@ export function AskNeoSection({
                     </button>
                   )}
                 </div>
-                {loadingSessions ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted" />
-                  </div>
-                ) : sessions.length === 0 ? (
+                {cacheChecked && sessions.length === 0 ? (
                   <p className="text-center text-sm text-muted py-8">
                     No sessions yet
                   </p>
@@ -709,11 +714,7 @@ export function AskNeoSection({
                   <br />
                   See You!
                 </h2>
-                {loadingPrompts ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted" />
-                  </div>
-                ) : dynamicPrompts.length > 0 ? (
+                {dynamicPrompts.length > 0 ? (
                   <div className="w-full max-w-4xl px-4">
                     <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {dynamicPrompts.map((prompt) => (

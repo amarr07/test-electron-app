@@ -536,7 +536,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     if (trimmed) return trimmed;
     if (user?.displayName?.trim()) return user.displayName.trim();
     if (user?.email) return user.email.split("@")[0];
-    return "Unnamed user";
+    return "User";
   }, [fullName, user?.displayName, user?.email]);
 
   const userInitial =

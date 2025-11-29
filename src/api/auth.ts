@@ -2,7 +2,6 @@ import { config, electronAPI } from "@/lib/electron";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { storage } from "@/lib/storage";
 import {
-  createUserWithEmailAndPassword,
   deleteUser,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signOut as firebaseSignOut,
@@ -125,18 +124,8 @@ class AuthManager {
         email.trim(),
         password,
       );
-      await this.ensureUserRecord(credential.user);
       return credential.user;
     } catch (error: any) {
-      if (error?.code === "auth/user-not-found") {
-        const credential = await createUserWithEmailAndPassword(
-          auth,
-          email.trim(),
-          password,
-        );
-        await this.ensureUserRecord(credential.user);
-        return credential.user;
-      }
       throw this.handleAuthError(error);
     }
   }
@@ -277,12 +266,12 @@ class AuthManager {
         accessToken || undefined,
       );
       const userCredential = await signInWithCredential(auth, credential);
+      const currentUser = userCredential.user;
 
       if (accessToken) {
         await storage.setGoogleAccessToken(accessToken);
       }
 
-      const currentUser = userCredential.user;
       await this.ensureUserRecord(currentUser);
       if (accessToken && (!currentUser.displayName || !currentUser.photoURL)) {
         try {
@@ -474,9 +463,7 @@ class AuthManager {
 
     try {
       await firebaseSignOut(this.auth);
-      await storage.removeAuthToken();
-      await storage.remove("authDisplayName");
-      await storage.clearGoogleAccessToken();
+      await storage.clearSessionData();
       this.currentUser = null;
       if (this.onAuthStateChangedCallback) {
         this.onAuthStateChangedCallback(null);
@@ -495,9 +482,7 @@ class AuthManager {
     }
     try {
       await deleteUser(this.auth.currentUser);
-      await storage.removeAuthToken();
-      await storage.remove("authDisplayName");
-      await storage.clearGoogleAccessToken();
+      await storage.clearSessionData();
       this.currentUser = null;
       if (this.onAuthStateChangedCallback) {
         this.onAuthStateChangedCallback(null);

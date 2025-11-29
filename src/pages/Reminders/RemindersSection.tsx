@@ -8,7 +8,6 @@ import {
   updateTask,
 } from "@/api/reminders";
 import { CreateReminderModal } from "@/components/CreateReminderModal";
-import { Loader } from "@/components/ui/loader";
 import { useToast } from "@/providers/ToastProvider";
 import {
   Check,
@@ -379,8 +378,13 @@ function EditableDueDate({
                 const isToday = date.getTime() === today.getTime();
                 const isSelected =
                   task.due_date &&
-                  new Date(task.due_date).toDateString() ===
-                    date.toDateString();
+                  (() => {
+                    const dueDate = new Date(task.due_date);
+                    dueDate.setHours(0, 0, 0, 0);
+                    const compareDate = new Date(date);
+                    compareDate.setHours(0, 0, 0, 0);
+                    return dueDate.getTime() === compareDate.getTime();
+                  })();
 
                 return (
                   <button
@@ -423,11 +427,51 @@ export function RemindersSection({
   const [activeTab, setActiveTab] = useState<"all" | "important">("all");
   const [showCompleted, setShowCompleted] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+
+  // Initialize from cache synchronously to prevent empty state flash
   const [categorizedSections, setCategorizedSections] = useState<TaskSection[]>(
-    [],
+    () => {
+      try {
+        const cached = localStorage.getItem("reminders_cache");
+        if (cached) {
+          const { sections: cachedSections, timestamp } = JSON.parse(cached);
+          // Use cache if it's less than 5 minutes old
+          if (
+            Date.now() - timestamp < 5 * 60 * 1000 &&
+            cachedSections.length > 0
+          ) {
+            return cachedSections;
+          }
+        }
+      } catch (error) {
+        // Ignore cache errors
+      }
+      return [];
+    },
   );
-  const [allTasksData, setAllTasksData] = useState<TaskGroup[]>([]);
+
+  const [isInitialLoad, setIsInitialLoad] = useState(
+    categorizedSections.length === 0,
+  );
+  const [allTasksData, setAllTasksData] = useState<TaskGroup[]>(() => {
+    try {
+      const cached = localStorage.getItem("reminders_cache");
+      if (cached) {
+        const { allTasks: cachedAllTasks, timestamp } = JSON.parse(cached);
+        if (
+          Date.now() - timestamp < 5 * 60 * 1000 &&
+          cachedAllTasks.length > 0
+        ) {
+          return cachedAllTasks;
+        }
+      }
+    } catch (error) {
+      // Ignore cache errors
+    }
+    return [];
+  });
+  const [cacheChecked, setCacheChecked] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(),
   );
@@ -447,6 +491,11 @@ export function RemindersSection({
   const todayStart = useMemo(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
+
+  // Mark cache as checked after mount
+  useEffect(() => {
+    setCacheChecked(true);
   }, []);
 
   /**
@@ -642,16 +691,107 @@ export function RemindersSection({
         });
       }
 
-      setCategorizedSections(sections);
-      setAllTasksData(sections.flatMap((section) => section.groups));
+      // Merge new sections with existing ones if refreshing
+      setCategorizedSections((prevSections) => {
+        let finalSections: TaskSection[];
 
-      const allGroupKeys = new Set<string>();
-      sections.forEach((section) => {
-        section.groups.forEach((_, groupIdx) => {
-          allGroupKeys.add(`${section.key}-${groupIdx}`);
+        if (isInitialLoad || prevSections.length === 0) {
+          finalSections = sections;
+        } else {
+          // Merge: prepend new tasks to existing sections
+          const existingSectionMap = new Map(
+            prevSections.map((s) => [s.key, s]),
+          );
+          const mergedSections: TaskSection[] = [];
+
+          sections.forEach((newSection) => {
+            const existing = existingSectionMap.get(newSection.key);
+            if (existing) {
+              // Merge groups, prepending new tasks
+              const existingGroupMap = new Map<string, TaskGroup>(
+                existing.groups.map((g) => [g.memoryId || g.title || "", g]),
+              );
+              const mergedGroups: TaskGroup[] = [];
+
+              newSection.groups.forEach((newGroup) => {
+                const groupKey = newGroup.memoryId || newGroup.title || "";
+                const existingGroup = existingGroupMap.get(groupKey);
+                if (existingGroup) {
+                  // Merge tasks, prepending new ones
+                  const existingTaskIds = new Set(
+                    existingGroup.tasks.map((t) => t.id),
+                  );
+                  const newTasks = newGroup.tasks.filter(
+                    (t) => !existingTaskIds.has(t.id),
+                  );
+                  mergedGroups.push({
+                    ...existingGroup,
+                    tasks: [...newTasks, ...existingGroup.tasks],
+                  });
+                } else {
+                  mergedGroups.push(newGroup);
+                }
+              });
+
+              // Add existing groups that weren't in new data
+              existing.groups.forEach((existingGroup) => {
+                const groupKey =
+                  existingGroup.memoryId || existingGroup.title || "";
+                if (
+                  !newSection.groups.some(
+                    (g) => (g.memoryId || g.title || "") === groupKey,
+                  )
+                ) {
+                  mergedGroups.push(existingGroup);
+                }
+              });
+
+              mergedSections.push({
+                ...existing,
+                groups: mergedGroups,
+              });
+            } else {
+              mergedSections.push(newSection);
+            }
+          });
+
+          // Add existing sections that weren't in new data
+          prevSections.forEach((existingSection) => {
+            if (!sections.some((s) => s.key === existingSection.key)) {
+              mergedSections.push(existingSection);
+            }
+          });
+
+          finalSections = mergedSections;
+        }
+
+        setAllTasksData(finalSections.flatMap((section) => section.groups));
+
+        // Update cache
+        try {
+          localStorage.setItem(
+            "reminders_cache",
+            JSON.stringify({
+              sections: finalSections,
+              allTasks: finalSections.flatMap((section) => section.groups),
+              timestamp: Date.now(),
+            }),
+          );
+        } catch (error) {
+          // Ignore cache errors
+        }
+
+        const allGroupKeys = new Set<string>();
+        finalSections.forEach((section) => {
+          section.groups.forEach((_, groupIdx) => {
+            allGroupKeys.add(`${section.key}-${groupIdx}`);
+          });
         });
+        setCollapsedGroups(allGroupKeys);
+        setIsInitialLoad(false);
+
+        return finalSections;
       });
-      setCollapsedGroups(allGroupKeys);
     } catch (error: any) {
       toast({
         title: "Unable to load reminders",
@@ -662,7 +802,7 @@ export function RemindersSection({
       setLoading(false);
       onLoadingChange?.(false);
     }
-  }, [toast, onLoadingChange, todayStart]);
+  }, [toast, onLoadingChange, todayStart, isInitialLoad]);
 
   /**
    * Updates task in both categorized sections and all tasks data.
@@ -1718,9 +1858,7 @@ export function RemindersSection({
             </div>
           </div>
 
-          {loading ? (
-            <Loader label="Loading your reminders..." className="flex-1" />
-          ) : filteredSections.length === 0 ? (
+          {cacheChecked && filteredSections.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center text-center">
               <div className="mb-4 flex items-center justify-center">
                 {activeTab === "important" ? (

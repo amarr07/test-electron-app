@@ -12,6 +12,7 @@ import { HomeSection } from "@/pages/Home";
 import { MemoriesView } from "@/pages/Memories";
 import { RemindersSection } from "@/pages/Reminders";
 import { useEventStatus } from "@/providers/EventStatusProvider";
+import { useToast } from "@/providers/ToastProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
@@ -42,6 +43,7 @@ export function MainLayout() {
   const { elapsed: dockElapsed, reset: resetDockTimer } = useTimer(
     recorderStatus === "recording",
   );
+  const { toast } = useToast();
 
   useEffect(() => {
     if (recorderStatus === "idle") {
@@ -62,21 +64,53 @@ export function MainLayout() {
   }, []);
 
   const handleStart = useCallback(async () => {
-    await startRecording();
-  }, [startRecording]);
+    try {
+      await startRecording();
+    } catch (error: any) {
+      toast({
+        title: "Unable to start recording",
+        description: error?.message || "Try again.",
+        variant: "destructive",
+      });
+    }
+  }, [startRecording, toast]);
 
   const handlePause = useCallback(async () => {
-    await pauseRecording();
-  }, [pauseRecording]);
+    try {
+      await pauseRecording();
+    } catch (error: any) {
+      toast({
+        title: "Unable to pause recording",
+        description: error?.message || "Try again.",
+        variant: "destructive",
+      });
+    }
+  }, [pauseRecording, toast]);
 
   const handleResume = useCallback(async () => {
-    await resumeRecording();
-  }, [resumeRecording]);
+    try {
+      await resumeRecording();
+    } catch (error: any) {
+      toast({
+        title: "Unable to resume recording",
+        description: error?.message || "Try again.",
+        variant: "destructive",
+      });
+    }
+  }, [resumeRecording, toast]);
 
   const handleStop = useCallback(async () => {
-    await stopRecording();
-    resetDockTimer();
-  }, [resetDockTimer, stopRecording]);
+    try {
+      await stopRecording();
+      resetDockTimer();
+    } catch (error: any) {
+      toast({
+        title: "Unable to stop recording",
+        description: error?.message || "Try again.",
+        variant: "destructive",
+      });
+    }
+  }, [resetDockTimer, stopRecording, toast]);
 
   /**
    * Triggers refresh of a specific section by incrementing refresh counter.
@@ -139,16 +173,32 @@ export function MainLayout() {
   const [memoriesSubmittedQuery, setMemoriesSubmittedQuery] = useState("");
 
   const handleBack = useCallback(() => {
+    // 1) If a memory detail view is open, close it first.
     if (isMemoryDetailOpen && memoryDetailCloseRef.current) {
       memoryDetailCloseRef.current();
       return;
     }
+
+    // 2) If we're on the Memories section with an active search, clear search
+    // and return to the normal memories timeline instead of navigating away.
+    if (activeSection === "memories" && memoriesSubmittedQuery.length > 0) {
+      setMemoriesSubmittedQuery("");
+      setMemoriesSearchResults([]);
+      return;
+    }
+
+    // 3) Otherwise, fall back to browser history / home navigation.
     if (window.history.length > 1) {
       window.history.back();
       return;
     }
     setActiveSection("home");
-  }, [isMemoryDetailOpen]);
+  }, [
+    activeSection,
+    isMemoryDetailOpen,
+    memoriesSubmittedQuery.length,
+    setActiveSection,
+  ]);
 
   const compactSections = new Set(["home", "memories", "reminders", "ask-neo"]);
 

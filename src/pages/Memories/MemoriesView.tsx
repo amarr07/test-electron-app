@@ -19,7 +19,6 @@ import {
 } from "@/api/reminders";
 import { CreateReminderModal } from "@/components/CreateReminderModal";
 import { MemoryChatInterface } from "@/components/MemoryChatInterface";
-import { Loader } from "@/components/ui/loader";
 import { MarkdownText } from "@/components/ui/markdown";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { highlightText } from "@/lib/highlightText";
@@ -96,11 +95,38 @@ export function MemoriesView({
   onMergeStateChange?: (isMerging: boolean) => void;
 }) {
   const { toast } = useToast();
-  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+
+  // Initialize from cache synchronously to prevent empty state flash
+  const [memories, setMemories] = useState<MemoryRecord[]>(() => {
+    try {
+      const cached = localStorage.getItem("memories_cache");
+      if (cached) {
+        const { memories: cachedMemories, timestamp } = JSON.parse(cached);
+        // Use cache if it's less than 5 minutes old
+        if (
+          Date.now() - timestamp < 5 * 60 * 1000 &&
+          cachedMemories.length > 0
+        ) {
+          return cachedMemories;
+        }
+      }
+    } catch (error) {
+      // Ignore cache errors
+    }
+    return [];
+  });
+
   const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<MemoryRecord[]>([]);
+  const [isInitialLoad, setIsInitialLoad] = useState(memories.length === 0);
+  const [cacheChecked, setCacheChecked] = useState(false);
+
+  // Mark cache as checked after mount
+  useEffect(() => {
+    setCacheChecked(true);
+  }, []);
 
   useEffect(() => {
     if (externalSearchResults !== undefined) {
@@ -154,41 +180,10 @@ export function MemoriesView({
   const pageCursorsRef = useRef<(string | null)[]>([null]);
   const latestRequestRef = useRef(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [maxVisitedPage, setMaxVisitedPage] = useState(1);
-  const [searchPage, setSearchPage] = useState(1);
-  const SEARCH_PAGE_SIZE = 10;
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const [searchVisibleCount, setSearchVisibleCount] = useState(10);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const normalizedSearchQuery = submittedSearchQuery.trim().toLowerCase();
-
-  useEffect(() => {
-    const scrollableContainer = document.querySelector(
-      ".flex-1.overflow-y-auto.min-h-0",
-    );
-    if (scrollableContainer) {
-      scrollableContainer.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }, [currentPage]);
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      const scrollableContainer = document.querySelector(
-        ".flex-1.overflow-y-auto.min-h-0",
-      ) as HTMLElement;
-      if (scrollableContainer) {
-        scrollableContainer.scrollTo({ top: 0, behavior: "smooth" });
-      } else {
-        const mainContainer = document.querySelector(
-          "[class*='overflow-y-auto']",
-        ) as HTMLElement;
-        if (mainContainer) {
-          mainContainer.scrollTo({ top: 0, behavior: "smooth" });
-        } else {
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }
-      }
-    });
-  }, [searchPage]);
 
   const filtersActive =
     filtersApplied &&
@@ -295,14 +290,46 @@ export function MemoriesView({
         if (latestRequestRef.current !== requestId) {
           return;
         }
-        setMemories(records);
+
+        // For page 1, if we have existing memories and this is a refresh, prepend new ones
+        setMemories((prev) => {
+          let finalMemories: MemoryRecord[];
+
+          if (targetPage === 1 && prev.length > 0 && !isInitialLoad) {
+            // Find new memories that don't exist in current list
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newRecords = records.filter((r) => !existingIds.has(r.id));
+            finalMemories =
+              newRecords.length > 0 ? [...newRecords, ...prev] : prev;
+          } else {
+            finalMemories = targetPage === 1 ? records : [...prev, ...records];
+          }
+
+          // Update cache for page 1
+          if (targetPage === 1) {
+            try {
+              localStorage.setItem(
+                "memories_cache",
+                JSON.stringify({
+                  memories: finalMemories,
+                  timestamp: Date.now(),
+                }),
+              );
+            } catch (error) {
+              // Ignore cache errors
+            }
+          }
+
+          return finalMemories;
+        });
+
         setHasMore(more);
         setCurrentPage(targetPage);
-        setMaxVisitedPage((prev) => Math.max(prev, targetPage));
         pageCursorsRef.current = [
           ...pageCursorsRef.current.slice(0, targetPage),
           nextCursor ?? null,
         ];
+        setIsInitialLoad(false);
       } catch (error: any) {
         if (latestRequestRef.current !== requestId) {
           return;
@@ -321,7 +348,14 @@ export function MemoriesView({
         }
       }
     },
-    [filtersActive, filteredMemoryIds, onLoadingChange, toast, viewArchived],
+    [
+      filtersActive,
+      filteredMemoryIds,
+      onLoadingChange,
+      toast,
+      viewArchived,
+      isInitialLoad,
+    ],
   );
 
   useEffect(() => {
@@ -329,8 +363,8 @@ export function MemoriesView({
       setMemories(searchResults);
       setHasMore(false);
       setCurrentPage(1);
-      setMaxVisitedPage(1);
       pageCursorsRef.current = [null];
+      setSearchVisibleCount(10);
       setLoading(false);
       onLoadingChange?.(false);
     } else if (
@@ -346,6 +380,7 @@ export function MemoriesView({
     if (submittedSearchQuery.length === 0) {
       pageCursorsRef.current = [null];
       loadMemories({ targetPage: 1, cursorOverride: null });
+      setSearchVisibleCount(10);
     }
   }, [filtersActive, viewArchived, loadMemories, submittedSearchQuery]);
 
@@ -353,6 +388,7 @@ export function MemoriesView({
     if (refreshToken !== undefined) {
       pageCursorsRef.current = [null];
       loadMemories({ targetPage: 1, cursorOverride: null });
+      setSearchVisibleCount(10);
     }
   }, [refreshToken, loadMemories]);
 
@@ -363,9 +399,8 @@ export function MemoriesView({
   useEffect(() => {
     if (submittedSearchQuery.length > 0) {
       setCurrentPage(1);
-      setMaxVisitedPage(1);
-      setSearchPage(1);
       pageCursorsRef.current = [null];
+      setSearchVisibleCount(10);
     }
   }, [submittedSearchQuery]);
 
@@ -662,17 +697,14 @@ export function MemoriesView({
 
   const filteredMemories = useMemo(() => {
     if (submittedSearchQuery.length > 0 && searchResults.length > 0) {
-      const startIndex = (searchPage - 1) * SEARCH_PAGE_SIZE;
-      const endIndex = startIndex + SEARCH_PAGE_SIZE;
-      return searchResults.slice(startIndex, endIndex);
+      // When searching, show results incrementally using searchVisibleCount.
+      return searchResults.slice(0, searchVisibleCount);
     }
     if (filtersActive) {
       return memories;
     }
     if (submittedSearchQuery.length > 0) {
-      const startIndex = (searchPage - 1) * SEARCH_PAGE_SIZE;
-      const endIndex = startIndex + SEARCH_PAGE_SIZE;
-      return searchResults.slice(startIndex, endIndex);
+      return searchResults;
     }
     return memories.filter((memory) => {
       const haystacks = [
@@ -697,8 +729,7 @@ export function MemoriesView({
     normalizedSearchQuery,
     submittedSearchQuery,
     searchResults,
-    searchPage,
-    SEARCH_PAGE_SIZE,
+    searchVisibleCount,
   ]);
 
   const groupedMemories = useMemo(() => {
@@ -727,28 +758,71 @@ export function MemoriesView({
   }, [filteredMemories]);
 
   const noMatches =
-    !loading && memories.length > 0 && filteredMemories.length === 0;
+    cacheChecked &&
+    !loading &&
+    memories.length > 0 &&
+    filteredMemories.length === 0;
   const hasSearchResults =
     submittedSearchQuery.length > 0 && filteredMemories.length > 0;
   const isSearchMode = submittedSearchQuery.trim().length > 0;
-  const totalSearchPages = Math.ceil(searchResults.length / SEARCH_PAGE_SIZE);
-  const shouldShowPagination =
-    !isSearchMode && (hasMore || maxVisitedPage > 1 || currentPage > 1);
-  const shouldShowSearchPagination =
-    isSearchMode && searchResults.length > SEARCH_PAGE_SIZE;
   const contentSpacing = hasSearchResults ? "space-y-3" : "space-y-6";
 
-  if (loading && memories.length === 0) {
-    return (
-      <SectionShell>
-        <div className="flex flex-1 items-center justify-center">
-          <Loader label="Loading your memories..." />
-        </div>
-      </SectionShell>
-    );
-  }
+  // Infinite scroll: load more memories when the sentinel becomes visible.
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
 
-  if (!loading && memories.length === 0) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry.isIntersecting) return;
+
+        if (isSearchMode) {
+          // Client-side incremental loading for search results.
+          if (searchVisibleCount < searchResults.length && !searchLoadingMore) {
+            setSearchLoadingMore(true);
+            // Small timeout to keep behavior consistent with async loads.
+            setTimeout(() => {
+              setSearchVisibleCount((prev) =>
+                Math.min(prev + 10, searchResults.length),
+              );
+              setSearchLoadingMore(false);
+            }, 150);
+          }
+        } else if (hasMore && !loading) {
+          // Server-side pagination for the main timeline.
+          loadMemories({ targetPage: currentPage + 1 });
+        }
+      },
+      {
+        root: null,
+        // Start loading a bit before the very bottom so the user sees a smooth flow.
+        rootMargin: "200px",
+        threshold: 0.1,
+      },
+    );
+
+    observer.observe(sentinel);
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    currentPage,
+    hasMore,
+    isSearchMode,
+    loading,
+    loadMemories,
+    searchResults.length,
+    searchVisibleCount,
+    searchLoadingMore,
+  ]);
+
+  // Removed loader - always show content if available
+  // Only show empty state after cache has been checked to prevent flash
+  const shouldShowEmptyState =
+    cacheChecked && !loading && memories.length === 0;
+
+  if (shouldShowEmptyState) {
     if (filtersActive || filtersApplied) {
       return (
         <SectionShell>
@@ -914,7 +988,11 @@ export function MemoriesView({
   return (
     <SectionShell>
       <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col min-h-0">
-        <div className={`${contentSpacing} flex-1 pr-1`}>
+        <div
+          className={`${contentSpacing} flex-1 pr-1 ${
+            selectionMode && selectedIds.length > 0 ? "pb-24" : ""
+          }`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[11px] uppercase tracking-[0.25em] text-muted/80">
               {mergeMode
@@ -1473,7 +1551,7 @@ export function MemoriesView({
           {groupedMemories.map((group, index) => (
             <div
               key={group.key}
-              className={`space-y-3 ${selectionMode && selectedIds.length > 0 ? "pb-24" : ""} ${index > 0 ? "pt-6" : ""}`}
+              className={`space-y-3 ${index > 0 ? "pt-6" : ""}`}
             >
               {(() => {
                 const groupIds = group.items.map((item) => item.id);
@@ -1534,93 +1612,19 @@ export function MemoriesView({
               </div>
             </div>
           ))}
-          {shouldShowPagination && (
-            <div className="flex items-center justify-center pb-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentPage > 1) {
-                      loadMemories({ targetPage: currentPage - 1 });
-                    }
-                  }}
-                  disabled={currentPage === 1 || loading}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                {Array.from(
-                  { length: maxVisitedPage },
-                  (_, idx) => idx + 1,
-                ).map((page) => (
-                  <button
-                    key={page}
-                    type="button"
-                    onClick={() => {
-                      loadMemories({ targetPage: page });
-                    }}
-                    disabled={loading && page !== currentPage}
-                    className={`min-w-[36px] rounded-full px-3 py-1 text-xs font-semibold transition ${
-                      page === currentPage
-                        ? "bg-[#0f8b54] text-white shadow-[0_8px_18px_rgba(0,0,0,0.22)]"
-                        : "text-muted hover:text-foreground hover:bg-surface/80"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (hasMore) {
-                      loadMemories({ targetPage: currentPage + 1 });
-                    }
-                  }}
-                  disabled={!hasMore || loading}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-          {shouldShowSearchPagination && (
-            <div className="flex items-center justify-center pb-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (searchPage > 1) {
-                      setSearchPage(searchPage - 1);
-                    }
-                  }}
-                  disabled={searchPage === 1}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  className="min-w-[36px] rounded-full px-3 py-1 text-xs font-semibold bg-[#0f8b54] text-white shadow-[0_8px_18px_rgba(0,0,0,0.22)]"
-                >
-                  {searchPage}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (searchPage < totalSearchPages) {
-                      setSearchPage(searchPage + 1);
-                    }
-                  }}
-                  disabled={searchPage >= totalSearchPages}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground hover:border-foreground disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <div
+            ref={loadMoreRef}
+            className="flex items-center justify-center py-4"
+          >
+            {!isSearchMode && loading && hasMore && memories.length > 0 && (
+              <Loader2 className="h-5 w-5 animate-spin text-[#0f8b54]" />
+            )}
+            {isSearchMode &&
+              searchVisibleCount < searchResults.length &&
+              searchLoadingMore && (
+                <Loader2 className="h-5 w-5 animate-spin text-[#0f8b54]" />
+              )}
+          </div>
         </div>
       </div>
       {selectionMode && selectedIds.length > 0 && (
@@ -4965,19 +4969,44 @@ function getMemoryDateKey(memory: MemoryRecord): string {
 }
 
 /**
- * Formats date key as readable label (e.g., "15 Jan" or "15 Jan 2023" if not current year).
+ * Formats date key as readable label (e.g., "15 Jan - Today", "14 Jan - Yesterday", or "15 Jan" for older dates).
  */
 function formatMemoryGroupLabel(key: string): string {
   if (key === "unknown") return "Unknown date";
   const date = new Date(key);
   if (Number.isNaN(date.getTime())) return "Unknown date";
+
   const day = date.getDate();
   const month = date.toLocaleDateString("en-US", { month: "short" });
   const year = date.getFullYear();
   const currentYear = new Date().getFullYear();
 
+  // Get today's date at midnight for comparison
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Get yesterday's date at midnight for comparison
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  // Get the memory date at midnight for comparison
+  const memoryDate = new Date(date);
+  memoryDate.setHours(0, 0, 0, 0);
+
+  // Check if it's today
+  if (memoryDate.getTime() === today.getTime()) {
+    return `${day} ${month} - Today`;
+  }
+
+  // Check if it's yesterday
+  if (memoryDate.getTime() === yesterday.getTime()) {
+    return `${day} ${month} - Yesterday`;
+  }
+
+  // For older dates, include year if not current year
   if (year !== currentYear) {
     return `${day} ${month} ${year}`;
   }
+
   return `${day} ${month}`;
 }

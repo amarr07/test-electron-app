@@ -67,8 +67,6 @@ export function MemoryChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const cancelStreamRef = useRef<(() => void) | null>(null);
-  const pendingTextRef = useRef("");
-  const typingTimeoutRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const overlayInputRef = useRef<HTMLInputElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -165,46 +163,12 @@ export function MemoryChatInterface({
     }
   }, [isOpen, prompt]);
 
-  const hasAutoSentRef = useRef<string | null>(null);
-  const pendingInitialQuestionRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (initialQuestion && initialQuestion.trim()) {
-      if (hasAutoSentRef.current !== initialQuestion) {
-        pendingInitialQuestionRef.current = initialQuestion;
-        setPrompt(initialQuestion);
-        hasAutoSentRef.current = initialQuestion;
-      }
-    } else {
-      hasAutoSentRef.current = null;
-      pendingInitialQuestionRef.current = null;
-    }
-  }, [initialQuestion]);
-
-  useEffect(() => {
-    if (
-      pendingInitialQuestionRef.current &&
-      prompt === pendingInitialQuestionRef.current &&
-      !isStreaming &&
-      prompt.trim().length > 0
-    ) {
-      pendingInitialQuestionRef.current = null;
-      const timeoutId = setTimeout(() => {
-        handleSend();
-      }, 200);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [prompt, isStreaming]);
+  const lastInitialQuestionRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
       cancelStreamRef.current?.();
       cancelStreamRef.current = null;
-      if (typingTimeoutRef.current !== null) {
-        window.clearTimeout(typingTimeoutRef.current);
-      }
-      typingTimeoutRef.current = null;
-      pendingTextRef.current = "";
     };
   }, []);
   useEffect(() => {
@@ -212,15 +176,9 @@ export function MemoryChatInterface({
     setCurrentChatId(null);
     setPrompt("");
     setIsStreaming(false);
-    hasAutoSentRef.current = null;
-    pendingInitialQuestionRef.current = null;
+    lastInitialQuestionRef.current = null;
     cancelStreamRef.current?.();
     cancelStreamRef.current = null;
-    pendingTextRef.current = "";
-    if (typingTimeoutRef.current !== null) {
-      window.clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
   }, [memoryContextKey]);
 
   const updateLastAssistantMessage = useCallback(
@@ -243,49 +201,6 @@ export function MemoryChatInterface({
     },
     [],
   );
-
-  const scheduleTyping = useCallback(() => {
-    if (typingTimeoutRef.current !== null) {
-      return;
-    }
-    const step = () => {
-      if (!pendingTextRef.current.length) {
-        typingTimeoutRef.current = null;
-        return;
-      }
-      const sliceSize = Math.max(
-        1,
-        Math.min(4, Math.ceil(pendingTextRef.current.length / 60)),
-      );
-      const chunk = pendingTextRef.current.slice(0, sliceSize);
-      pendingTextRef.current = pendingTextRef.current.slice(sliceSize);
-      updateLastAssistantMessage((last) => ({
-        ...last,
-        content: (last.content || "") + chunk,
-      }));
-      typingTimeoutRef.current = window.setTimeout(step, 45);
-    };
-    typingTimeoutRef.current = window.setTimeout(step, 0);
-  }, [updateLastAssistantMessage]);
-
-  const waitForTypingToFinish = useCallback((callback: () => void) => {
-    const check = () => {
-      if (!pendingTextRef.current.length && typingTimeoutRef.current === null) {
-        callback();
-      } else {
-        window.setTimeout(check, 40);
-      }
-    };
-    check();
-  }, []);
-
-  const clearTypingState = useCallback(() => {
-    pendingTextRef.current = "";
-    if (typingTimeoutRef.current !== null) {
-      window.clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-  }, []);
 
   const closeMemoryPreview = useCallback(() => {
     setMemoryPreview(null);
@@ -354,7 +269,6 @@ export function MemoryChatInterface({
     setMessages((prev) => [...prev, userMessage]);
     setPrompt("");
     setIsStreaming(true);
-    clearTypingState();
 
     try {
       let chatId = currentChatId;
@@ -405,8 +319,10 @@ export function MemoryChatInterface({
         chatId,
         memoryIds: activeMemoryIds,
         onChunk: (chunk) => {
-          pendingTextRef.current += chunk;
-          scheduleTyping();
+          updateLastAssistantMessage((last) => ({
+            ...last,
+            content: (last.content || "") + chunk,
+          }));
         },
         onComplete: (sources) => {
           if (sources && sources.length > 0) {
@@ -415,10 +331,8 @@ export function MemoryChatInterface({
               sources,
             }));
           }
-          waitForTypingToFinish(() => {
-            setIsStreaming(false);
-            cancelStreamRef.current = null;
-          });
+          setIsStreaming(false);
+          cancelStreamRef.current = null;
         },
         onError: (error) => {
           toast({
@@ -429,7 +343,6 @@ export function MemoryChatInterface({
           setMessages((prev) => prev.slice(0, -1));
           setIsStreaming(false);
           cancelStreamRef.current = null;
-          clearTypingState();
         },
         onMetadata: (metadata) => {
           if (metadata?.chat_id) {
@@ -446,7 +359,6 @@ export function MemoryChatInterface({
       setMessages((prev) => prev.slice(0, -1));
       setIsStreaming(false);
       cancelStreamRef.current = null;
-      clearTypingState();
     }
   };
 
@@ -484,6 +396,19 @@ export function MemoryChatInterface({
     setPrompt(promptText);
     handleSend(promptText);
   };
+
+  // When a new initialQuestion is provided (e.g., from a Brainstorm card),
+  // open the chat and send it once as a quick prompt.
+  useEffect(() => {
+    const trimmed = initialQuestion?.trim();
+    if (!trimmed) return;
+
+    if (lastInitialQuestionRef.current === trimmed) {
+      return;
+    }
+    lastInitialQuestionRef.current = trimmed;
+    handleQuickPrompt(trimmed);
+  }, [initialQuestion]);
 
   const handleInputFocus = () => {
     if (!isOpen) {
@@ -679,89 +604,99 @@ export function MemoryChatInterface({
                   </p>
                 </div>
               ) : (
-                messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex gap-3 ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
+                messages.map((message, index) => {
+                  const isLastAssistantThinking =
+                    isStreaming &&
+                    index === messages.length - 1 &&
+                    message.role === "assistant" &&
+                    !message.content;
+
+                  return (
                     <div
-                      className={`max-w-[85%] ${
+                      key={message.id}
+                      className={`flex gap-3 ${
                         message.role === "user"
-                          ? "rounded-3xl rounded-br-md bg-primary px-5 py-3.5 text-primary-foreground"
-                          : "px-1 py-1 text-foreground"
+                          ? "justify-end"
+                          : "justify-start"
                       }`}
                     >
-                      {message.role === "assistant" ? (
-                        message.content ? (
-                          <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-foreground">
-                            <MarkdownText content={message.content} />
-                          </div>
+                      <div
+                        className={`max-w-[85%] ${
+                          message.role === "user"
+                            ? "rounded-3xl rounded-br-md bg-primary px-5 py-3.5 text-primary-foreground"
+                            : "px-1 py-1 text-foreground"
+                        }`}
+                      >
+                        {message.role === "assistant" ? (
+                          message.content ? (
+                            <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-foreground">
+                              <MarkdownText content={message.content} />
+                            </div>
+                          ) : isLastAssistantThinking ? (
+                            <div className="flex items-center gap-2 text-muted">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span className="text-sm font-medium">
+                                Thinking...
+                              </span>
+                            </div>
+                          ) : null
                         ) : (
-                          <div className="flex items-center gap-2 text-muted">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span className="text-sm font-medium">
-                              Thinking...
-                            </span>
-                          </div>
-                        )
-                      ) : (
-                        <p className="text-sm leading-relaxed">
-                          {message.content}
-                        </p>
-                      )}
-                      {message.sources && message.sources.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-border/30">
-                          <p className="mb-2 text-xs font-medium text-muted">
-                            Sources:
+                          <p className="text-sm leading-relaxed">
+                            {message.content}
                           </p>
-                          <div className="space-y-1.5">
-                            {(message.sources ?? [])
-                              .slice(0, 3)
-                              .map((source, idx) => (
-                                <button
-                                  type="button"
-                                  key={`${source.memory_id ?? idx}-${idx}`}
-                                  onClick={() =>
-                                    handleSourceClick(source.memory_id)
-                                  }
-                                  disabled={!source.memory_id}
-                                  className="w-full text-left rounded-xl border border-border/60 bg-surface/70 px-3 py-2 text-xs text-muted transition hover:border-primary/60 hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60"
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <span
-                                      aria-hidden="true"
-                                      className="mt-1 inline-flex h-1.5 w-1.5 rounded-full bg-primary/60"
-                                    />
-                                    <div className="space-y-0.5">
-                                      <p className="text-xs font-medium text-foreground">
-                                        {source.title?.trim() ||
-                                          `Memory ${source.memory_id}`}
-                                      </p>
-                                      {source.created_at && (
-                                        <p className="text-[11px] text-muted/80">
-                                          {new Date(
-                                            source.created_at,
-                                          ).toLocaleString()}
+                        )}
+                        {message.sources && message.sources.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-border/30">
+                            <p className="mb-2 text-xs font-medium text-muted">
+                              Sources:
+                            </p>
+                            <div className="space-y-1.5">
+                              {(message.sources ?? [])
+                                .slice(0, 3)
+                                .map((source, idx) => (
+                                  <button
+                                    type="button"
+                                    key={`${source.memory_id ?? idx}-${idx}`}
+                                    onClick={() =>
+                                      handleSourceClick(source.memory_id)
+                                    }
+                                    disabled={!source.memory_id}
+                                    className="w-full text-left rounded-xl border border-border/60 bg-surface/70 px-3 py-2 text-xs text-muted transition hover:border-primary/60 hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60"
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <span
+                                        aria-hidden="true"
+                                        className="mt-1 inline-flex h-1.5 w-1.5 rounded-full bg-primary/60"
+                                      />
+                                      <div className="space-y-0.5">
+                                        <p className="text-xs font-medium text-foreground">
+                                          {source.title?.trim() ||
+                                            `Memory ${source.memory_id}`}
                                         </p>
-                                      )}
+                                        {source.created_at && (
+                                          <p className="text-[11px] text-muted/80">
+                                            {new Date(
+                                              source.created_at,
+                                            ).toLocaleString()}
+                                          </p>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                </button>
-                              ))}
-                            {(message.sources?.length ?? 0) > 3 && (
-                              <p className="text-[11px] text-muted/70">
-                                Showing top 3 of {message.sources.length}{" "}
-                                references.
-                              </p>
-                            )}
+                                  </button>
+                                ))}
+                              {(message.sources?.length ?? 0) > 3 && (
+                                <p className="text-[11px] text-muted/70">
+                                  Showing top 3 of {message.sources.length}{" "}
+                                  references.
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
               <div ref={messagesEndRef} />
             </div>

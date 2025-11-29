@@ -4,7 +4,6 @@ import {
   type CalendarEvent,
   type CalendarEventsByDate,
 } from "@/api/calendar";
-import { Loader } from "@/components/ui/loader";
 import type { RecordingState } from "@/hooks/useRecorder";
 import { useTimer } from "@/hooks/useTimer";
 import { storage } from "@/lib/storage";
@@ -32,10 +31,34 @@ export function CalendarEvents({
   externalRefreshToken,
   recorderStatus,
 }: CalendarEventsProps) {
-  const [eventsByDate, setEventsByDate] = useState<CalendarEventsByDate[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Initialize from cache synchronously to prevent empty state flash
+  const [eventsByDate, setEventsByDate] = useState<CalendarEventsByDate[]>(
+    () => {
+      try {
+        const cached = localStorage.getItem("calendar_events_cache");
+        if (cached) {
+          const { events: cachedEvents, timestamp } = JSON.parse(cached);
+          // Use cache if it's less than 5 minutes old
+          if (
+            Date.now() - timestamp < 5 * 60 * 1000 &&
+            cachedEvents.length > 0
+          ) {
+            return cachedEvents;
+          }
+        }
+      } catch (error) {
+        // Ignore cache errors
+      }
+      return [];
+    },
+  );
+
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(eventsByDate.length === 0);
+  const [cacheChecked, setCacheChecked] = useState(false);
   const [connectingCalendar, setConnectingCalendar] = useState(false);
+  const [needsCalendarConnection, setNeedsCalendarConnection] = useState(false);
   const { toast } = useToast();
   const { registerEvents } = useNotifications();
   const timerStartTimeRef = useRef<number | null>(null);
@@ -99,6 +122,11 @@ export function CalendarEvents({
     },
     [getManuallyStoppedEvents],
   );
+
+  // Mark cache as checked after mount
+  useEffect(() => {
+    setCacheChecked(true);
+  }, []);
 
   const getTimerState = useCallback((): {
     activeEventId: string | null;
@@ -194,18 +222,84 @@ export function CalendarEvents({
       setEventsByDate([]);
       setLoading(false);
       setError(null);
+      setNeedsCalendarConnection(true);
       onLoadingChange?.(false);
       return;
     }
 
     setLoading(true);
     setError(null);
+    setNeedsCalendarConnection(false);
     onLoadingChange?.(true);
     try {
       const events = await calendarService.getEvents();
       registerEvents(events || []);
       const grouped = calendarService.groupEventsByDate(events || []);
-      setEventsByDate(grouped);
+
+      // Merge new events with existing ones if refreshing
+      setEventsByDate((prevEvents) => {
+        if (isInitialLoad || prevEvents.length === 0) {
+          const finalEvents = grouped;
+          // Update cache
+          try {
+            localStorage.setItem(
+              "calendar_events_cache",
+              JSON.stringify({
+                events: finalEvents,
+                timestamp: Date.now(),
+              }),
+            );
+          } catch (error) {
+            // Ignore cache errors
+          }
+          setIsInitialLoad(false);
+          return finalEvents;
+        }
+
+        // Merge: combine events by date, prepending new ones
+        const existingDateMap = new Map(prevEvents.map((e) => [e.date, e]));
+        const merged: CalendarEventsByDate[] = [];
+
+        grouped.forEach((newGroup) => {
+          const existing = existingDateMap.get(newGroup.date);
+          if (existing) {
+            // Merge events, prepending new ones
+            const existingEventIds = new Set(existing.events.map((e) => e.id));
+            const newEvents = newGroup.events.filter(
+              (e) => !existingEventIds.has(e.id),
+            );
+            merged.push({
+              ...existing,
+              events: [...newEvents, ...existing.events],
+            });
+          } else {
+            merged.push(newGroup);
+          }
+        });
+
+        // Add existing dates that weren't in new data
+        prevEvents.forEach((existingGroup) => {
+          if (!grouped.some((g) => g.date === existingGroup.date)) {
+            merged.push(existingGroup);
+          }
+        });
+
+        // Update cache
+        try {
+          localStorage.setItem(
+            "calendar_events_cache",
+            JSON.stringify({
+              events: merged,
+              timestamp: Date.now(),
+            }),
+          );
+        } catch (error) {
+          // Ignore cache errors
+        }
+
+        setIsInitialLoad(false);
+        return merged;
+      });
     } catch (err: any) {
       const message = err?.message || "Unable to load calendar events.";
       setEventsByDate([]);
@@ -219,7 +313,7 @@ export function CalendarEvents({
       setLoading(false);
       onLoadingChange?.(false);
     }
-  }, [onLoadingChange, registerEvents, toast]);
+  }, [onLoadingChange, registerEvents, toast, isInitialLoad]);
 
   useEffect(() => {
     loadEvents();
@@ -463,13 +557,7 @@ export function CalendarEvents({
     return { month, day };
   };
 
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader label="Syncing your calendar..." />
-      </div>
-    );
-  }
+  // Removed loader - always show content if available
 
   const needsCalendarPermission =
     error &&
@@ -588,17 +676,39 @@ export function CalendarEvents({
     );
   }
 
-  if (filteredEvents.length === 0) {
+  // Only show empty state after cache has been checked to prevent flash
+  if (cacheChecked && filteredEvents.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex h-full min-h-[16rem] items-center justify-center">
         <div className="flex flex-col items-center text-center space-y-3 text-muted/70">
-          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0f8b54]/10 text-[#0f8b54] shadow-inner">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl text-[#0f8b54]">
             <CalendarRange className="h-6 w-6" />
           </span>
           <p className="text-sm font-semibold text-foreground">
-            {searchQuery ? "No events found" : "No upcoming events"}
+            {searchQuery
+              ? "No events found"
+              : needsCalendarConnection
+                ? "Connect your Google Calendar"
+                : "No upcoming events"}
           </p>
-          {!searchQuery && (
+          {!searchQuery && needsCalendarConnection && (
+            <>
+              <p className="text-xs text-muted max-w-xs">
+                Link your Google Calendar to see your upcoming meetings!
+              </p>
+              <button
+                type="button"
+                onClick={handleConnectCalendar}
+                disabled={connectingCalendar}
+                className="mt-1 rounded-full bg-primary text-white px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+              >
+                {connectingCalendar
+                  ? "Connecting..."
+                  : "Connect Google Calendar"}
+              </button>
+            </>
+          )}
+          {!searchQuery && !needsCalendarConnection && (
             <p className="text-xs text-muted max-w-xs">
               Connect your Google Calendar or create a new event to see it here.
             </p>
