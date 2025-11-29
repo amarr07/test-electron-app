@@ -43,4 +43,4 @@ declare global {
 }
 
 export const electronAPI = window.electronAPI;
-export const config = window.config || {};
+export const config: Config = window.config || {};

@@ -193,7 +193,7 @@ class AuthManager {
 
   /**
    * Signs in with Google using custom OAuth window for Electron.
-   * Works in both dev and production builds.
+   * Uses response_mode=query to get tokens in query params for better reliability.
    */
   async signInWithGoogle(): Promise<User> {
     const auth = this.ensureAuth();
@@ -208,21 +208,26 @@ class AuthManager {
         throw new Error("Google Client ID not configured");
       }
 
-      // Build Google OAuth URL
+      // Scopes for authentication and calendar access
       const scopes = [
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
+        "openid",
+        "email",
+        "profile",
         "https://www.googleapis.com/auth/calendar.readonly",
       ];
 
       const redirectUri = `https://${config.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/handler`;
+      const nonce = Math.random().toString(36).substring(2);
+
+      // Use implicit flow with id_token in query params (works better in Electron)
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
         response_type: "id_token token",
+        response_mode: "query", // Put tokens in query params instead of fragment
         scope: scopes.join(" "),
+        nonce: nonce,
         prompt: "select_account",
-        nonce: Math.random().toString(36),
       });
 
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
@@ -252,15 +257,27 @@ class AuthManager {
         });
       });
 
-      // Parse tokens from callback URL
-      const urlParams = new URLSearchParams(result.url.split("#")[1] || "");
-      const idToken = urlParams.get("id_token");
-      const accessToken = urlParams.get("access_token");
+      // Parse tokens from callback URL - try both query params and fragment
+      let idToken: string | null = null;
+      let accessToken: string | null = null;
+
+      // Try query params first (response_mode=query)
+      const urlObj = new URL(result.url);
+      idToken = urlObj.searchParams.get("id_token");
+      accessToken = urlObj.searchParams.get("access_token");
+
+      // Fallback to fragment (hash)
+      if (!idToken && result.url.includes("#")) {
+        const hashParams = new URLSearchParams(result.url.split("#")[1]);
+        idToken = hashParams.get("id_token");
+        accessToken = hashParams.get("access_token");
+      }
 
       if (!idToken) {
         throw new Error("No ID token received from Google");
       }
 
+      // Sign in to Firebase with Google credential
       const credential = GoogleAuthProvider.credential(
         idToken,
         accessToken || undefined,
@@ -268,6 +285,7 @@ class AuthManager {
       const userCredential = await signInWithCredential(auth, credential);
       const currentUser = userCredential.user;
 
+      // Store access token for Google Calendar API
       if (accessToken) {
         await storage.setGoogleAccessToken(accessToken);
       }
@@ -356,15 +374,15 @@ class AuthManager {
       const redirectUri = `https://${config.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/handler`;
 
       // Use "code id_token" to get both authorization code AND id_token
-      // We'll use the id_token directly, avoiding server-side exchange
-      // response_mode=fragment puts tokens in URL hash which we can detect
+      // Apple requires response_mode=form_post when requesting name or email scope
       // IMPORTANT: Apple requires the SHA256 hash of the nonce, not the raw nonce
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
         response_type: "code id_token",
-        response_mode: "fragment",
+        response_mode: "form_post",
         state: state,
+        scope: "name email", // Request name and email from Apple
         nonce: hashedNonce, // Send hashed nonce to Apple
       });
 
@@ -538,7 +556,7 @@ class AuthManager {
       const providerId =
         user.providerData?.find((p) => p.providerId)?.providerId || "password";
       const displayName =
-        user.displayName?.trim() || user.email?.split("@")[0] || "New user";
+        user.displayName?.trim() || user.email?.split("@")[0] || "User";
 
       await upsertUser({
         id: user.uid,

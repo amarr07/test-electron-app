@@ -107,6 +107,12 @@ function createWindow() {
     },
   );
 
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    (details, callback) => {
+      callback({ requestHeaders: { ...details.requestHeaders } });
+    },
+  );
+
   if (process.env.NODE_ENV === "development" || !app.isPackaged) {
     mainWindow.loadURL("http://localhost:5173");
   } else {
@@ -140,9 +146,9 @@ function createOAuthWindow(url, callbackUrl) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false, // Disable web security to allow Apple's OAuth page to work.
+      webSecurity: true, // Keep security enabled, handle CSP below
+      sandbox: true, // Enable sandbox for OAuth window too
     },
-    crossOriginOpenerPolicy: { value: "unsafe-none" },
   });
 
   oauthWindow.webContents.session.webRequest.onHeadersReceived(
