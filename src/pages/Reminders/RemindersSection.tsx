@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import * as XLSX from "xlsx";
 
 interface TaskGroup {
   title: string;
@@ -466,9 +467,27 @@ export function RemindersSection({
     return [];
   });
   const [cacheChecked, setCacheChecked] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
-    new Set(),
-  );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const cached = localStorage.getItem("reminders_cache");
+      if (cached) {
+        const { sections: cachedSections, timestamp } = JSON.parse(cached);
+        if (
+          Date.now() - timestamp < 5 * 60 * 1000 &&
+          cachedSections.length > 0
+        ) {
+          const allGroupKeys = new Set<string>();
+          cachedSections.forEach((section: TaskSection) => {
+            section.groups.forEach((_, groupIdx) => {
+              allGroupKeys.add(`${section.key}-${groupIdx}`);
+            });
+          });
+          return allGroupKeys;
+        }
+      }
+    } catch (error) {}
+    return new Set();
+  });
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [shareTimeRange, setShareTimeRange] = useState<ShareTimeRange>("today");
@@ -1169,7 +1188,7 @@ export function RemindersSection({
     setShareMenuOpen(false);
   };
 
-  const handleShareToApps = async () => {
+  const handleShareToApps = () => {
     const filteredTasks = getFilteredTasks(shareTimeRange);
     if (filteredTasks.length === 0) {
       toast({
@@ -1180,34 +1199,43 @@ export function RemindersSection({
       return;
     }
 
-    if (!navigator.share) {
-      toast({
-        title: "Share unavailable",
-        description: "Your device does not support sharing.",
-        variant: "destructive",
-      });
-      return;
-    }
+    const worksheetData = filteredTasks.map((task) => ({
+      CONTENT: task.task_name,
+      DESCRIPTION: task.details || "",
+      DATE: task.created_at
+        ? new Date(task.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+      DEADLINE: task.due_date
+        ? new Date(task.due_date).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+      IMPORTANT: task.important ? "Yes" : "No",
+    }));
 
-    const text = formatTasksAsText(filteredTasks);
-    try {
-      await navigator.share({
-        title: "Reminders",
-        text,
-      });
-      toast({
-        title: "Shared",
-        description: "Sent using your installed apps.",
-      });
-    } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        toast({
-          title: "Unable to share",
-          description: "Try copying the text instead.",
-          variant: "destructive",
-        });
-      }
-    }
+    const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Reminders");
+
+    const xlsxBuffer = XLSX.write(workbook, {
+      type: "array",
+      bookType: "xlsx",
+    });
+    const blob = new Blob([xlsxBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reminders-${shareTimeRange}-${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "XLSX downloaded",
+      description: `${filteredTasks.length} reminder${filteredTasks.length !== 1 ? "s" : ""} exported.`,
+    });
     setShareMenuOpen(false);
   };
 
@@ -1235,37 +1263,49 @@ export function RemindersSection({
     setShareMenuOpen(false);
   };
 
-  const handleShareGroupToApps = async (group: TaskGroup) => {
+  const handleShareGroupToApps = (group: TaskGroup) => {
     if (!group.tasks.length) return;
 
-    if (!navigator.share) {
-      toast({
-        title: "Share unavailable",
-        description: "Your device does not support sharing.",
-        variant: "destructive",
-      });
-      return;
-    }
+    const worksheetData = group.tasks.map((task) => ({
+      CONTENT: task.task_name,
+      DESCRIPTION: task.details || "",
+      DATE: task.created_at
+        ? new Date(task.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+      DEADLINE: task.due_date
+        ? new Date(task.due_date).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+      IMPORTANT: task.important ? "Yes" : "No",
+    }));
 
-    const text = formatTasksAsText(group.tasks);
-    try {
-      await navigator.share({
-        title: group.title || "Reminders",
-        text,
-      });
-      toast({
-        title: "Shared",
-        description: "Sent using your installed apps.",
-      });
-    } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        toast({
-          title: "Unable to share",
-          description: "Try copying the text instead.",
-          variant: "destructive",
-        });
-      }
-    }
+    const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Reminders");
+
+    const xlsxBuffer = XLSX.write(workbook, {
+      type: "array",
+      bookType: "xlsx",
+    });
+    const blob = new Blob([xlsxBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeTitle = (group.title || "reminders")
+      .replace(/[^a-z0-9]/gi, "-")
+      .toLowerCase();
+    a.download = `reminders-${safeTitle}-${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "XLSX downloaded",
+      description: `${group.tasks.length} reminder${group.tasks.length !== 1 ? "s" : ""} from "${group.title}" exported.`,
+    });
     setGroupShareMenuKey(null);
   };
 

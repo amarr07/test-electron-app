@@ -473,6 +473,7 @@ class AuthManager {
 
   /**
    * Signs out current user and clears all stored tokens.
+   * Ensures recording is stopped and mic is released before logout.
    */
   async signOut(): Promise<void> {
     if (!this.auth) {
@@ -480,6 +481,11 @@ class AuthManager {
     }
 
     try {
+      try {
+        const { audioRecorder } = await import("@/lib/recorder");
+        await audioRecorder.forceCleanup();
+      } catch (cleanupError) {}
+
       await firebaseSignOut(this.auth);
       await storage.clearSessionData();
       this.currentUser = null;

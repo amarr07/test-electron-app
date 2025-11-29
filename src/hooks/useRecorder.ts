@@ -1,7 +1,8 @@
 import { getValidAuthToken } from "@/api/httpClient";
 import { uploadManager } from "@/api/upload";
 import { audioRecorder, type RecordingStatus } from "@/lib/recorder";
-import { useCallback, useRef, useState } from "react";
+import { useAuthContext } from "@/providers/AuthProvider";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type RecordingState = "idle" | "recording" | "paused";
 
@@ -10,6 +11,7 @@ export type RecordingState = "idle" | "recording" | "paused";
  * Handles start, pause, resume, stop operations and uploads chunks to backend.
  */
 export function useRecorder() {
+  const { user } = useAuthContext();
   const [status, setStatus] = useState<RecordingState>("idle");
   const [error, setError] = useState<string | null>(null);
   const recordingStatusRef = useRef<RecordingStatus | null>(null);
@@ -108,6 +110,25 @@ export function useRecorder() {
       throw err;
     }
   }, []);
+
+  /**
+   * Stops recording immediately when user logs out.
+   * Ensures mic is released even if logout happens during recording.
+   */
+  useEffect(() => {
+    if (!user && (status === "recording" || status === "paused")) {
+      audioRecorder
+        .forceCleanup()
+        .then(() => {
+          recordingStatusRef.current = audioRecorder.getStatus();
+          setStatus("idle");
+        })
+        .catch(() => {
+          recordingStatusRef.current = audioRecorder.getStatus();
+          setStatus("idle");
+        });
+    }
+  }, [user, status]);
 
   return {
     status,

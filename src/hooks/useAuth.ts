@@ -91,9 +91,8 @@ export function useAuth() {
       await updateUserProfile(user.uid, updates);
 
       if (updates.name && user.displayName !== updates.name) {
-        const { updateProfile: updateAuthProfile } = await import(
-          "firebase/auth"
-        );
+        const { updateProfile: updateAuthProfile } =
+          await import("firebase/auth");
         const { getFirebaseAuth } = await import("@/lib/firebase");
         const auth = getFirebaseAuth();
         if (auth?.currentUser) {

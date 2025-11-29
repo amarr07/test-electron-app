@@ -58,6 +58,7 @@ import {
   useRef,
   useState,
 } from "react";
+import * as XLSX from "xlsx";
 
 /**
  * Wrapper component for page sections with consistent layout.
@@ -2876,7 +2877,7 @@ function MemoryDetailView({
     setShareRemindersMenuOpen((prev) => !prev);
   };
 
-  const handleShareRemindersToApps = async () => {
+  const handleShareRemindersToApps = () => {
     if (memoryReminders.length === 0) {
       toast({
         title: "No reminders available",
@@ -2886,34 +2887,50 @@ function MemoryDetailView({
       return;
     }
 
-    if (!navigator.share) {
-      toast({
-        title: "Share unavailable",
-        description: "Your device does not support sharing.",
-        variant: "destructive",
-      });
-      return;
-    }
+    const worksheetData = memoryReminders.map((task) => ({
+      CONTENT: task.task_name,
+      DESCRIPTION: task.details || "",
+      DATE: task.created_at
+        ? new Date(task.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+      DEADLINE: task.due_date
+        ? new Date(task.due_date).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+      IMPORTANT: task.important ? "Yes" : "No",
+    }));
 
-    const text = formatRemindersAsText(memoryReminders);
-    try {
-      await navigator.share({
-        title: localMemory.title || "Reminders",
-        text,
-      });
-      toast({
-        title: "Shared",
-        description: "Sent using your installed apps.",
-      });
-    } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        toast({
-          title: "Unable to share",
-          description: "Try copying the text instead.",
-          variant: "destructive",
-        });
-      }
-    }
+    const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Reminders");
+
+    const xlsxBuffer = XLSX.write(workbook, {
+      type: "array",
+      bookType: "xlsx",
+    });
+    const blob = new Blob([xlsxBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeTitle =
+      localMemory.title
+        ?.toLowerCase()
+        .replace(/[^a-z0-9]+/gi, "-")
+        .replace(/^-+|-+$/g, "") || "memory";
+    a.download = `reminders-${safeTitle}-${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "XLSX downloaded",
+      description: `${memoryReminders.length} reminder${
+        memoryReminders.length !== 1 ? "s" : ""
+      } exported.`,
+    });
     setShareRemindersMenuOpen(false);
   };
 

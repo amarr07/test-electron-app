@@ -39,7 +39,8 @@ export function MainLayout() {
     resume: resumeRecording,
     stop: stopRecording,
   } = useRecorder();
-  const { isTranscribing, isMemoryProcessing } = useEventStatus();
+  const { isTranscribing, isMemoryProcessing, memoryRefreshVersion } =
+    useEventStatus();
   const { elapsed: dockElapsed, reset: resetDockTimer } = useTimer(
     recorderStatus === "recording",
   );
@@ -50,6 +51,12 @@ export function MainLayout() {
       resetDockTimer();
     }
   }, [recorderStatus, resetDockTimer]);
+
+  useEffect(() => {
+    if (memoryRefreshVersion > 0) {
+      setMemoriesRefreshCounter((prev) => prev + 1);
+    }
+  }, [memoryRefreshVersion]);
 
   const handleHomeLoadingChange = useCallback((loading: boolean) => {
     setIsHomeRefreshing(loading);

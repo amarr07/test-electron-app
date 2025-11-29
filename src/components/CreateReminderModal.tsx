@@ -8,7 +8,8 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface CreateReminderModalProps {
   onClose: () => void;
@@ -48,6 +49,7 @@ export function CreateReminderModal({
   const [saving, setSaving] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
+  const dateButtonRef = useRef<HTMLButtonElement | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     if (dueDate) {
       const date = new Date(dueDate);
@@ -81,16 +83,94 @@ export function CreateReminderModal({
   useEffect(() => {
     if (!datePickerOpen) return;
     const handleClick = (event: MouseEvent) => {
-      if (
-        datePickerRef.current &&
-        !datePickerRef.current.contains(event.target as Node)
-      ) {
+      const target = event.target as Node;
+      const pickerContains = datePickerRef.current?.contains(target);
+      const buttonContains = dateButtonRef.current?.contains(target);
+      if (!pickerContains && !buttonContains) {
         setDatePickerOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [datePickerOpen]);
+
+  const updatePickerPosition = useCallback(() => {
+    if (!datePickerOpen || !datePickerRef.current || !dateButtonRef.current)
+      return;
+
+    const buttonRect = dateButtonRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const pickerHeight = 400;
+    const pickerWidth = 288;
+    const padding = 8;
+    const minSpaceFromEdge = 16;
+
+    const spaceBelow = viewportHeight - buttonRect.bottom;
+    const spaceAbove = buttonRect.top;
+
+    let top = buttonRect.bottom + window.scrollY + padding;
+    let maxHeight = pickerHeight;
+
+    if (spaceBelow < pickerHeight + minSpaceFromEdge) {
+      if (spaceAbove > spaceBelow && spaceAbove >= minSpaceFromEdge) {
+        top =
+          buttonRect.top +
+          window.scrollY -
+          Math.min(pickerHeight, spaceAbove - minSpaceFromEdge) -
+          padding;
+        maxHeight = Math.min(pickerHeight, spaceAbove - minSpaceFromEdge);
+      } else {
+        top = buttonRect.bottom + window.scrollY + padding;
+        maxHeight = Math.max(
+          200,
+          Math.min(pickerHeight, spaceBelow - minSpaceFromEdge),
+        );
+      }
+    } else {
+      maxHeight = Math.min(pickerHeight, spaceBelow - minSpaceFromEdge);
+    }
+
+    const minTop = window.scrollY + minSpaceFromEdge;
+    if (top < minTop) {
+      top = minTop;
+      const availableHeight =
+        viewportHeight - (top - window.scrollY) - minSpaceFromEdge;
+      maxHeight = Math.max(200, Math.min(pickerHeight, availableHeight));
+    }
+
+    let left = buttonRect.right - pickerWidth + window.scrollX;
+    if (left + pickerWidth > viewportWidth + window.scrollX) {
+      left = viewportWidth + window.scrollX - pickerWidth - minSpaceFromEdge;
+    }
+    if (left < window.scrollX + minSpaceFromEdge) {
+      left = window.scrollX + minSpaceFromEdge;
+    }
+
+    if (datePickerRef.current) {
+      datePickerRef.current.style.position = "absolute";
+      datePickerRef.current.style.top = `${top}px`;
+      datePickerRef.current.style.left = `${left}px`;
+      datePickerRef.current.style.maxHeight = `${maxHeight}px`;
+    }
+  }, [datePickerOpen]);
+
+  useEffect(() => {
+    if (!datePickerOpen) return;
+    updatePickerPosition();
+
+    const handleScrollOrResize = () => {
+      updatePickerPosition();
+    };
+
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+
+    return () => {
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [datePickerOpen, updatePickerPosition]);
 
   /**
    * Generates 42-day calendar grid starting from Monday of the week containing month start.
@@ -188,6 +268,7 @@ export function CreateReminderModal({
           <div className="relative flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-surface px-4 py-3 text-sm text-muted">
             <div className="relative">
               <button
+                ref={dateButtonRef}
                 type="button"
                 onClick={() => setDatePickerOpen((prev) => !prev)}
                 className="inline-flex items-center gap-2 rounded-full border border-border/80 px-3 py-1.5 font-semibold text-foreground transition hover:border-[#d0d0d0] dark:hover:border-border"
@@ -196,87 +277,89 @@ export function CreateReminderModal({
                 {formatDueDate() || "Add due date"}
               </button>
 
-              {datePickerOpen && (
-                <div
-                  ref={datePickerRef}
-                  className="absolute right-0 top-full z-50 mt-3 w-72 rounded-2xl border border-[#d0d0d0] dark:border-border/80 bg-surface p-4 shadow-[0_12px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
-                >
-                  <div className="flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCalendarMonth(
-                          new Date(
-                            calendarMonth.getFullYear(),
-                            calendarMonth.getMonth() - 1,
-                            1,
-                          ),
-                        )
-                      }
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition hover:bg-surface/80 hover:text-foreground"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-                    <p className="text-sm font-semibold text-foreground">
-                      {calendarMonth.toLocaleString(undefined, {
-                        month: "long",
-                        year: "numeric",
+              {datePickerOpen &&
+                createPortal(
+                  <div
+                    ref={datePickerRef}
+                    className="fixed z-[9999] w-72 rounded-2xl border border-[#d0d0d0] dark:border-border/80 bg-surface p-4 shadow-[0_12px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.35)] overflow-y-auto"
+                  >
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCalendarMonth(
+                            new Date(
+                              calendarMonth.getFullYear(),
+                              calendarMonth.getMonth() - 1,
+                              1,
+                            ),
+                          )
+                        }
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition hover:bg-surface/80 hover:text-foreground"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <p className="text-sm font-semibold text-foreground">
+                        {calendarMonth.toLocaleString(undefined, {
+                          month: "long",
+                          year: "numeric",
+                        })}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCalendarMonth(
+                            new Date(
+                              calendarMonth.getFullYear(),
+                              calendarMonth.getMonth() + 1,
+                              1,
+                            ),
+                          )
+                        }
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition hover:bg-surface/80 hover:text-foreground"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-wide text-muted">
+                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                        (day) => (
+                          <span key={day}>{day}</span>
+                        ),
+                      )}
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-7 gap-1 text-sm">
+                      {calendarDays.map((date) => {
+                        const isCurrentMonth =
+                          date.getMonth() === calendarMonth.getMonth();
+                        const isSelected =
+                          selectedDate && isSameDay(date, selectedDate);
+                        return (
+                          <button
+                            key={date.toISOString()}
+                            type="button"
+                            onClick={() => {
+                              setDueDate(date.toISOString());
+                              setDatePickerOpen(false);
+                            }}
+                            className={`h-9 rounded-full text-center transition ${
+                              isSelected
+                                ? "bg-[#0f8b54] text-white shadow"
+                                : isCurrentMonth
+                                  ? "text-foreground hover:bg-surface/80"
+                                  : "text-muted hover:bg-surface/40"
+                            }`}
+                          >
+                            {date.getDate()}
+                          </button>
+                        );
                       })}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCalendarMonth(
-                          new Date(
-                            calendarMonth.getFullYear(),
-                            calendarMonth.getMonth() + 1,
-                            1,
-                          ),
-                        )
-                      }
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition hover:bg-surface/80 hover:text-foreground"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-wide text-muted">
-                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                      (day) => (
-                        <span key={day}>{day}</span>
-                      ),
-                    )}
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-7 gap-1 text-sm">
-                    {calendarDays.map((date) => {
-                      const isCurrentMonth =
-                        date.getMonth() === calendarMonth.getMonth();
-                      const isSelected =
-                        selectedDate && isSameDay(date, selectedDate);
-                      return (
-                        <button
-                          key={date.toISOString()}
-                          type="button"
-                          onClick={() => {
-                            setDueDate(date.toISOString());
-                            setDatePickerOpen(false);
-                          }}
-                          className={`h-9 rounded-full text-center transition ${
-                            isSelected
-                              ? "bg-[#0f8b54] text-white shadow"
-                              : isCurrentMonth
-                                ? "text-foreground hover:bg-surface/80"
-                                : "text-muted hover:bg-surface/40"
-                          }`}
-                        >
-                          {date.getDate()}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                    </div>
+                  </div>,
+                  document.body,
+                )}
             </div>
             <button
               type="button"

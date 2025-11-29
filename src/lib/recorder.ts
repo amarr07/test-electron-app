@@ -379,6 +379,16 @@ class AudioRecorder {
   }
 
   /**
+   * Forcefully stops recording and cleans up all resources.
+   * Public method for emergency cleanup (e.g., on logout).
+   */
+  async forceCleanup(): Promise<void> {
+    this.recordingActive = false;
+    this.isPaused = false;
+    await this.cleanup();
+  }
+
+  /**
    * Cleans up all audio streams, contexts, and encoders.
    */
   private async cleanup(): Promise<void> {
@@ -398,9 +408,12 @@ class AudioRecorder {
     const stopStream = (stream: MediaStream | null) => {
       if (stream) {
         stream.getTracks().forEach((track) => {
-          if (track.readyState !== "ended") {
-            track.stop();
-          }
+          try {
+            if (track.readyState === "live") {
+              track.stop();
+            }
+            track.enabled = false;
+          } catch (err) {}
         });
       }
     };
