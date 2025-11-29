@@ -1,3 +1,4 @@
+import { hasAnyPairedDevice } from "@/api/device";
 import { getValidAuthToken } from "@/api/httpClient";
 import { uploadManager } from "@/api/upload";
 import { audioRecorder, type RecordingStatus } from "@/lib/recorder";
@@ -36,6 +37,15 @@ export function useRecorder() {
   const start = useCallback(async () => {
     try {
       await getValidAuthToken({ purpose: "start recording" });
+
+      // Check if user has any paired device (device_id) before starting recording
+      const hasDevice = await hasAnyPairedDevice();
+      if (!hasDevice) {
+        const errorMsg =
+          "No device ID found. Please pair a device before recording.";
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      }
 
       const result = await audioRecorder.start({
         includeMic: true,

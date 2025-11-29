@@ -219,12 +219,12 @@ class AuthManager {
       const redirectUri = `https://${config.FIREBASE_PROJECT_ID}.firebaseapp.com/__/auth/handler`;
       const nonce = Math.random().toString(36).substring(2);
 
-      // Use implicit flow with id_token in query params (works better in Electron)
+      // Use implicit flow - tokens will be in URL fragment (#)
+      // Google does not support response_mode=query for implicit flow
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
         response_type: "id_token token",
-        response_mode: "query", // Put tokens in query params instead of fragment
         scope: scopes.join(" "),
         nonce: nonce,
         prompt: "select_account",
@@ -257,20 +257,22 @@ class AuthManager {
         });
       });
 
-      // Parse tokens from callback URL - try both query params and fragment
+      // Parse tokens from callback URL
+      // For implicit flow, tokens are always in the URL fragment (#)
       let idToken: string | null = null;
       let accessToken: string | null = null;
 
-      // Try query params first (response_mode=query)
-      const urlObj = new URL(result.url);
-      idToken = urlObj.searchParams.get("id_token");
-      accessToken = urlObj.searchParams.get("access_token");
-
-      // Fallback to fragment (hash)
-      if (!idToken && result.url.includes("#")) {
+      if (result.url.includes("#")) {
         const hashParams = new URLSearchParams(result.url.split("#")[1]);
         idToken = hashParams.get("id_token");
         accessToken = hashParams.get("access_token");
+      }
+
+      // Also check query params as fallback (in case callback URL was modified)
+      if (!idToken) {
+        const urlObj = new URL(result.url);
+        idToken = urlObj.searchParams.get("id_token");
+        accessToken = urlObj.searchParams.get("access_token");
       }
 
       if (!idToken) {
@@ -291,6 +293,7 @@ class AuthManager {
       }
 
       await this.ensureUserRecord(currentUser);
+
       if (accessToken && (!currentUser.displayName || !currentUser.photoURL)) {
         try {
           const userInfoResponse = await fetch(

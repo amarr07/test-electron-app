@@ -160,6 +160,7 @@ export function MemoriesView({
     [],
   );
   const [availableDomains, setAvailableDomains] = useState<string[]>([]);
+  const metadataFetchAbortControllerRef = useRef<AbortController | null>(null);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>(
     [],
@@ -428,44 +429,89 @@ export function MemoriesView({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [filterMenuOpen]);
 
-  useEffect(() => {
-    if (!filterMenuOpen) return;
-    let cancelled = false;
-    const fetchMetadata = async () => {
+  const fetchFilterMetadata = useCallback(
+    async (overrideFilters?: {
+      tags?: string[];
+      entities?: string[];
+      domains?: string[];
+      startDate?: string;
+      endDate?: string;
+    }) => {
+      if (!filterMenuOpen) return;
+
+      if (metadataFetchAbortControllerRef.current) {
+        metadataFetchAbortControllerRef.current.abort();
+      }
+
+      const abortController = new AbortController();
+      metadataFetchAbortControllerRef.current = abortController;
+
       try {
         const timezone =
           Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+
+        const tagsToUse = overrideFilters?.tags ?? selectedTopics;
+        const entitiesToUse = overrideFilters?.entities ?? selectedParticipants;
+        const domainsToUse = overrideFilters?.domains ?? selectedDomains;
+        const startDateToUse =
+          overrideFilters?.startDate ?? selectedDateRange.start;
+        const endDateToUse = overrideFilters?.endDate ?? selectedDateRange.end;
+
         const meta = await getMemoriesMetadata({
           searchQuery: submittedSearchQuery || undefined,
-          tags: selectedTopics,
-          entities: selectedParticipants,
-          domains: selectedDomains,
-          startDate: selectedDateRange.start,
-          endDate: selectedDateRange.end,
+          tags: tagsToUse.length > 0 ? tagsToUse : undefined,
+          entities: entitiesToUse.length > 0 ? entitiesToUse : undefined,
+          domains: domainsToUse.length > 0 ? domainsToUse : undefined,
+          startDate: startDateToUse,
+          endDate: endDateToUse,
           timezone,
         });
-        if (cancelled) return;
+
+        if (abortController.signal.aborted) return;
+
+        setAvailableDomains(meta.domains ?? []);
         setAvailableTopics(meta.tags ?? []);
         setAvailableParticipants(meta.entities ?? []);
-        setAvailableDomains(meta.domains ?? []);
-        setMetadataRange({ min: meta.minStartedAt, max: meta.maxStartedAt });
-      } catch (error) {
+        setMetadataRange({
+          min: meta.minStartedAt,
+          max: meta.maxStartedAt,
+        });
+      } catch (error: any) {
+        if (error?.name === "AbortError") return;
         console.error("Failed to fetch memory metadata", error);
+      } finally {
+        if (metadataFetchAbortControllerRef.current === abortController) {
+          metadataFetchAbortControllerRef.current = null;
+        }
+      }
+    },
+    [
+      filterMenuOpen,
+      submittedSearchQuery,
+      selectedDomains,
+      selectedParticipants,
+      selectedTopics,
+      selectedDateRange.end,
+      selectedDateRange.start,
+    ],
+  );
+
+  useEffect(() => {
+    if (!filterMenuOpen) {
+      if (metadataFetchAbortControllerRef.current) {
+        metadataFetchAbortControllerRef.current.abort();
+        metadataFetchAbortControllerRef.current = null;
+      }
+      return;
+    }
+    fetchFilterMetadata();
+    return () => {
+      if (metadataFetchAbortControllerRef.current) {
+        metadataFetchAbortControllerRef.current.abort();
+        metadataFetchAbortControllerRef.current = null;
       }
     };
-    fetchMetadata();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    filterMenuOpen,
-    submittedSearchQuery,
-    selectedDomains,
-    selectedParticipants,
-    selectedTopics,
-    selectedDateRange.end,
-    selectedDateRange.start,
-  ]);
+  }, [filterMenuOpen]);
 
   useEffect(() => {
     if (!filterMenuOpen) {
@@ -1153,14 +1199,22 @@ export function MemoriesView({
                                     <button
                                       key={preset.label}
                                       type="button"
-                                      onClick={() =>
-                                        setSelectedDateRange({
+                                      onClick={async () => {
+                                        const newRange = {
                                           start: start
                                             .toISOString()
                                             .split("T")[0],
                                           end: end.toISOString().split("T")[0],
-                                        })
-                                      }
+                                        };
+                                        setSelectedDateRange(newRange);
+                                        await fetchFilterMetadata({
+                                          startDate: newRange.start,
+                                          endDate: newRange.end,
+                                          tags: selectedTopics,
+                                          entities: selectedParticipants,
+                                          domains: selectedDomains,
+                                        });
+                                      }}
                                       className={`rounded-full px-2.5 py-1 text-[10px] font-semibold border transition ${
                                         isActive
                                           ? "border-[#0f8b54] bg-[#0f8b54]/10 text-[#0f8b54]"
@@ -1177,24 +1231,40 @@ export function MemoriesView({
                                   type="date"
                                   value={selectedDateRange.start || ""}
                                   max={selectedDateRange.end || undefined}
-                                  onChange={(e) =>
-                                    setSelectedDateRange((prev) => ({
-                                      ...prev,
+                                  onChange={async (e) => {
+                                    const newRange = {
+                                      ...selectedDateRange,
                                       start: e.target.value || undefined,
-                                    }))
-                                  }
+                                    };
+                                    setSelectedDateRange(newRange);
+                                    await fetchFilterMetadata({
+                                      startDate: newRange.start,
+                                      endDate: newRange.end,
+                                      tags: selectedTopics,
+                                      entities: selectedParticipants,
+                                      domains: selectedDomains,
+                                    });
+                                  }}
                                   className="w-full rounded-lg border border-border/60 bg-surface px-2.5 py-1.5 text-[11px] text-foreground placeholder-muted focus:outline-none focus:border-[#0f8b54] focus:ring-1 focus:ring-[#0f8b54]/20"
                                 />
                                 <input
                                   type="date"
                                   value={selectedDateRange.end || ""}
                                   min={selectedDateRange.start || undefined}
-                                  onChange={(e) =>
-                                    setSelectedDateRange((prev) => ({
-                                      ...prev,
+                                  onChange={async (e) => {
+                                    const newRange = {
+                                      ...selectedDateRange,
                                       end: e.target.value || undefined,
-                                    }))
-                                  }
+                                    };
+                                    setSelectedDateRange(newRange);
+                                    await fetchFilterMetadata({
+                                      startDate: newRange.start,
+                                      endDate: newRange.end,
+                                      tags: selectedTopics,
+                                      entities: selectedParticipants,
+                                      domains: selectedDomains,
+                                    });
+                                  }}
                                   className="w-full rounded-lg border border-border/60 bg-surface px-2.5 py-1.5 text-[11px] text-foreground placeholder-muted focus:outline-none focus:border-[#0f8b54] focus:ring-1 focus:ring-[#0f8b54]/20"
                                 />
                               </div>
@@ -1234,13 +1304,18 @@ export function MemoriesView({
                                       {domain}
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          setSelectedDomains((prev) =>
-                                            prev.filter(
+                                        onClick={async () => {
+                                          const newDomains =
+                                            selectedDomains.filter(
                                               (item) => item !== domain,
-                                            ),
-                                          )
-                                        }
+                                            );
+                                          setSelectedDomains(newDomains);
+                                          await fetchFilterMetadata({
+                                            domains: newDomains,
+                                            tags: selectedTopics,
+                                            entities: selectedParticipants,
+                                          });
+                                        }}
                                         className="hover:bg-slate-100/50 dark:hover:bg-slate-800/40 rounded-full p-0.5 transition"
                                       >
                                         <X className="w-2.5 h-2.5" />
@@ -1277,15 +1352,20 @@ export function MemoriesView({
                                       <button
                                         key={domain}
                                         type="button"
-                                        onClick={() =>
-                                          setSelectedDomains((prev) =>
-                                            prev.includes(domain)
-                                              ? prev.filter(
+                                        onClick={async () => {
+                                          const newDomains =
+                                            selectedDomains.includes(domain)
+                                              ? selectedDomains.filter(
                                                   (item) => item !== domain,
                                                 )
-                                              : [...prev, domain],
-                                          )
-                                        }
+                                              : [...selectedDomains, domain];
+                                          setSelectedDomains(newDomains);
+                                          await fetchFilterMetadata({
+                                            domains: newDomains,
+                                            tags: selectedTopics,
+                                            entities: selectedParticipants,
+                                          });
+                                        }}
                                         className={`w-full rounded-lg px-2.5 py-1.5 text-left text-[11px] transition ${
                                           selected
                                             ? "bg-[#0f8b54]/10 text-[#0f8b54] font-semibold"
@@ -1327,13 +1407,18 @@ export function MemoriesView({
                                       {topic}
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          setSelectedTopics((prev) =>
-                                            prev.filter(
+                                        onClick={async () => {
+                                          const newTopics =
+                                            selectedTopics.filter(
                                               (item) => item !== topic,
-                                            ),
-                                          )
-                                        }
+                                            );
+                                          setSelectedTopics(newTopics);
+                                          await fetchFilterMetadata({
+                                            tags: newTopics,
+                                            entities: selectedParticipants,
+                                            domains: selectedDomains,
+                                          });
+                                        }}
                                         className="hover:bg-purple-100/50 dark:hover:bg-[#2a2a2a] rounded-full p-0.5 transition"
                                       >
                                         <X className="w-2.5 h-2.5" />
@@ -1369,15 +1454,20 @@ export function MemoriesView({
                                       <button
                                         key={topic}
                                         type="button"
-                                        onClick={() =>
-                                          setSelectedTopics((prev) =>
-                                            prev.includes(topic)
-                                              ? prev.filter(
+                                        onClick={async () => {
+                                          const newTopics =
+                                            selectedTopics.includes(topic)
+                                              ? selectedTopics.filter(
                                                   (item) => item !== topic,
                                                 )
-                                              : [...prev, topic],
-                                          )
-                                        }
+                                              : [...selectedTopics, topic];
+                                          setSelectedTopics(newTopics);
+                                          await fetchFilterMetadata({
+                                            tags: newTopics,
+                                            entities: selectedParticipants,
+                                            domains: selectedDomains,
+                                          });
+                                        }}
                                         className={`w-full rounded-lg px-2.5 py-1.5 text-left text-[11px] transition ${
                                           selected
                                             ? "bg-[#0f8b54]/10 text-[#0f8b54] font-semibold"
@@ -1419,13 +1509,20 @@ export function MemoriesView({
                                       {participant}
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          setSelectedParticipants((prev) =>
-                                            prev.filter(
+                                        onClick={async () => {
+                                          const newParticipants =
+                                            selectedParticipants.filter(
                                               (item) => item !== participant,
-                                            ),
-                                          )
-                                        }
+                                            );
+                                          setSelectedParticipants(
+                                            newParticipants,
+                                          );
+                                          await fetchFilterMetadata({
+                                            entities: newParticipants,
+                                            tags: selectedTopics,
+                                            domains: selectedDomains,
+                                          });
+                                        }}
                                         className="hover:bg-blue-100/50 dark:hover:bg-[#2a2a2a] rounded-full p-0.5 transition"
                                       >
                                         <X className="w-2.5 h-2.5" />
@@ -1465,16 +1562,28 @@ export function MemoriesView({
                                       <button
                                         key={participant}
                                         type="button"
-                                        onClick={() =>
-                                          setSelectedParticipants((prev) =>
-                                            prev.includes(participant)
-                                              ? prev.filter(
+                                        onClick={async () => {
+                                          const newParticipants =
+                                            selectedParticipants.includes(
+                                              participant,
+                                            )
+                                              ? selectedParticipants.filter(
                                                   (item) =>
                                                     item !== participant,
                                                 )
-                                              : [...prev, participant],
-                                          )
-                                        }
+                                              : [
+                                                  ...selectedParticipants,
+                                                  participant,
+                                                ];
+                                          setSelectedParticipants(
+                                            newParticipants,
+                                          );
+                                          await fetchFilterMetadata({
+                                            entities: newParticipants,
+                                            tags: selectedTopics,
+                                            domains: selectedDomains,
+                                          });
+                                        }}
                                         className={`w-full rounded-lg px-2.5 py-1.5 text-left text-[11px] transition ${
                                           selected
                                             ? "bg-[#0f8b54]/10 text-[#0f8b54] font-semibold"
