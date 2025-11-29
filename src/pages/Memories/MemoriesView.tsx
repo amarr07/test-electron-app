@@ -96,13 +96,11 @@ export function MemoriesView({
 }) {
   const { toast } = useToast();
 
-  // Initialize from cache synchronously to prevent empty state flash
   const [memories, setMemories] = useState<MemoryRecord[]>(() => {
     try {
       const cached = localStorage.getItem("memories_cache");
       if (cached) {
         const { memories: cachedMemories, timestamp } = JSON.parse(cached);
-        // Use cache if it's less than 5 minutes old
         if (
           Date.now() - timestamp < 5 * 60 * 1000 &&
           cachedMemories.length > 0
@@ -110,9 +108,7 @@ export function MemoriesView({
           return cachedMemories;
         }
       }
-    } catch (error) {
-      // Ignore cache errors
-    }
+    } catch (error) {}
     return [];
   });
 
@@ -123,14 +119,19 @@ export function MemoriesView({
   const [isInitialLoad, setIsInitialLoad] = useState(memories.length === 0);
   const [cacheChecked, setCacheChecked] = useState(false);
 
-  // Mark cache as checked after mount
   useEffect(() => {
     setCacheChecked(true);
   }, []);
 
   useEffect(() => {
     if (externalSearchResults !== undefined) {
-      setSearchResults(externalSearchResults);
+      const seenIds = new Set<string>();
+      const dedupedResults = externalSearchResults.filter((memory) => {
+        if (seenIds.has(memory.id)) return false;
+        seenIds.add(memory.id);
+        return true;
+      });
+      setSearchResults(dedupedResults);
       setSubmittedSearchQuery(_legacySearchQuery);
     }
   }, [externalSearchResults, _legacySearchQuery]);
@@ -291,12 +292,10 @@ export function MemoriesView({
           return;
         }
 
-        // For page 1, if we have existing memories and this is a refresh, prepend new ones
         setMemories((prev) => {
           let finalMemories: MemoryRecord[];
 
           if (targetPage === 1 && prev.length > 0 && !isInitialLoad) {
-            // Find new memories that don't exist in current list
             const existingIds = new Set(prev.map((m) => m.id));
             const newRecords = records.filter((r) => !existingIds.has(r.id));
             finalMemories =
@@ -305,7 +304,13 @@ export function MemoriesView({
             finalMemories = targetPage === 1 ? records : [...prev, ...records];
           }
 
-          // Update cache for page 1
+          const seenIds = new Set<string>();
+          finalMemories = finalMemories.filter((memory) => {
+            if (seenIds.has(memory.id)) return false;
+            seenIds.add(memory.id);
+            return true;
+          });
+
           if (targetPage === 1) {
             try {
               localStorage.setItem(
@@ -315,9 +320,7 @@ export function MemoriesView({
                   timestamp: Date.now(),
                 }),
               );
-            } catch (error) {
-              // Ignore cache errors
-            }
+            } catch (error) {}
           }
 
           return finalMemories;
@@ -360,7 +363,13 @@ export function MemoriesView({
 
   useEffect(() => {
     if (submittedSearchQuery.length > 0 && searchResults.length > 0) {
-      setMemories(searchResults);
+      const seenIds = new Set<string>();
+      const dedupedResults = searchResults.filter((memory) => {
+        if (seenIds.has(memory.id)) return false;
+        seenIds.add(memory.id);
+        return true;
+      });
+      setMemories(dedupedResults);
       setHasMore(false);
       setCurrentPage(1);
       pageCursorsRef.current = [null];
@@ -697,7 +706,6 @@ export function MemoriesView({
 
   const filteredMemories = useMemo(() => {
     if (submittedSearchQuery.length > 0 && searchResults.length > 0) {
-      // When searching, show results incrementally using searchVisibleCount.
       return searchResults.slice(0, searchVisibleCount);
     }
     if (filtersActive) {
@@ -734,7 +742,15 @@ export function MemoriesView({
 
   const groupedMemories = useMemo(() => {
     if (!filteredMemories.length) return [];
-    const sorted = [...filteredMemories].sort((a, b) => {
+
+    const seenIds = new Set<string>();
+    const dedupedFiltered = filteredMemories.filter((memory) => {
+      if (seenIds.has(memory.id)) return false;
+      seenIds.add(memory.id);
+      return true;
+    });
+
+    const sorted = [...dedupedFiltered].sort((a, b) => {
       const aTime = getMemorySortTimestamp(a);
       const bTime = getMemorySortTimestamp(b);
       return bTime - aTime;
@@ -767,7 +783,6 @@ export function MemoriesView({
   const isSearchMode = submittedSearchQuery.trim().length > 0;
   const contentSpacing = hasSearchResults ? "space-y-3" : "space-y-6";
 
-  // Infinite scroll: load more memories when the sentinel becomes visible.
   useEffect(() => {
     const sentinel = loadMoreRef.current;
     if (!sentinel) return;
@@ -778,10 +793,8 @@ export function MemoriesView({
         if (!entry.isIntersecting) return;
 
         if (isSearchMode) {
-          // Client-side incremental loading for search results.
           if (searchVisibleCount < searchResults.length && !searchLoadingMore) {
             setSearchLoadingMore(true);
-            // Small timeout to keep behavior consistent with async loads.
             setTimeout(() => {
               setSearchVisibleCount((prev) =>
                 Math.min(prev + 10, searchResults.length),
@@ -790,13 +803,11 @@ export function MemoriesView({
             }, 150);
           }
         } else if (hasMore && !loading) {
-          // Server-side pagination for the main timeline.
           loadMemories({ targetPage: currentPage + 1 });
         }
       },
       {
         root: null,
-        // Start loading a bit before the very bottom so the user sees a smooth flow.
         rootMargin: "200px",
         threshold: 0.1,
       },
@@ -817,8 +828,6 @@ export function MemoriesView({
     searchLoadingMore,
   ]);
 
-  // Removed loader - always show content if available
-  // Only show empty state after cache has been checked to prevent flash
   const shouldShowEmptyState =
     cacheChecked && !loading && memories.length === 0;
 
@@ -2880,8 +2889,7 @@ function MemoryDetailView({
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
-        description:
-          "Your device does not support sharing. Copy the text instead.",
+        description: "Your device does not support sharing.",
         variant: "destructive",
       });
       return;
@@ -3000,8 +3008,7 @@ function MemoryDetailView({
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
-        description:
-          "Your device does not support sharing. Copy the text instead.",
+        description: "Your device does not support sharing.",
         variant: "destructive",
       });
       return;
@@ -3747,8 +3754,7 @@ function TranscriptModal({
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
-        description:
-          "Your device does not support sharing. Copy the text instead.",
+        description: "Your device does not support sharing.",
         variant: "destructive",
       });
       return;
@@ -4561,8 +4567,7 @@ function ShareMemoryModal({
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
-        description:
-          "Your device does not support sharing. Copy the text instead.",
+        description: "Your device does not support sharing.",
         variant: "destructive",
       });
       return;
@@ -4981,29 +4986,23 @@ function formatMemoryGroupLabel(key: string): string {
   const year = date.getFullYear();
   const currentYear = new Date().getFullYear();
 
-  // Get today's date at midnight for comparison
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Get yesterday's date at midnight for comparison
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
-  // Get the memory date at midnight for comparison
   const memoryDate = new Date(date);
   memoryDate.setHours(0, 0, 0, 0);
 
-  // Check if it's today
   if (memoryDate.getTime() === today.getTime()) {
     return `${day} ${month} - Today`;
   }
 
-  // Check if it's yesterday
   if (memoryDate.getTime() === yesterday.getTime()) {
     return `${day} ${month} - Yesterday`;
   }
 
-  // For older dates, include year if not current year
   if (year !== currentYear) {
     return `${day} ${month} ${year}`;
   }

@@ -52,7 +52,6 @@ export function MemorySearchBar({
         }
 
         if (suggestions.length > 0) {
-          // Use backend suggestion as-is, no custom spacing logic.
           setAutocompleteSuggestion(suggestions[0]);
         } else {
           setAutocompleteSuggestion("");
@@ -105,7 +104,6 @@ export function MemorySearchBar({
         const results = await searchMemories(trimmedQuery);
         onSearch(trimmedQuery, results);
       } catch (error) {
-        console.error("Search failed:", error);
         onSearch(trimmedQuery, []);
       } finally {
         setIsSearchingState(false);
@@ -193,7 +191,6 @@ export function MemorySearchBar({
   const [inputWidth, setInputWidth] = useState(0);
   const measureRef = useRef<HTMLSpanElement>(null);
 
-  // Compute just the suffix to visually render after the typed query.
   const autocompleteSuffix = (() => {
     if (!autocompleteSuggestion || !searchQuery) return "";
     const suggestionLower = autocompleteSuggestion.toLowerCase();

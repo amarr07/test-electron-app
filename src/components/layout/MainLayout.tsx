@@ -136,7 +136,7 @@ export function MainLayout() {
    * Also refreshes on window focus and visibility change.
    */
   useEffect(() => {
-    const AUTO_REFRESH_INTERVAL_MS = 60_000;
+    const AUTO_REFRESH_INTERVAL_MS = 15_000;
     const refreshIfNeeded = () => {
       if (document.hidden || !navigator.onLine) return;
       if (activeSection === "home" && !isHomeRefreshing) {
@@ -173,21 +173,17 @@ export function MainLayout() {
   const [memoriesSubmittedQuery, setMemoriesSubmittedQuery] = useState("");
 
   const handleBack = useCallback(() => {
-    // 1) If a memory detail view is open, close it first.
     if (isMemoryDetailOpen && memoryDetailCloseRef.current) {
       memoryDetailCloseRef.current();
       return;
     }
 
-    // 2) If we're on the Memories section with an active search, clear search
-    // and return to the normal memories timeline instead of navigating away.
     if (activeSection === "memories" && memoriesSubmittedQuery.length > 0) {
       setMemoriesSubmittedQuery("");
       setMemoriesSearchResults([]);
       return;
     }
 
-    // 3) Otherwise, fall back to browser history / home navigation.
     if (window.history.length > 1) {
       window.history.back();
       return;

@@ -429,14 +429,12 @@ export function RemindersSection({
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Initialize from cache synchronously to prevent empty state flash
   const [categorizedSections, setCategorizedSections] = useState<TaskSection[]>(
     () => {
       try {
         const cached = localStorage.getItem("reminders_cache");
         if (cached) {
           const { sections: cachedSections, timestamp } = JSON.parse(cached);
-          // Use cache if it's less than 5 minutes old
           if (
             Date.now() - timestamp < 5 * 60 * 1000 &&
             cachedSections.length > 0
@@ -444,9 +442,7 @@ export function RemindersSection({
             return cachedSections;
           }
         }
-      } catch (error) {
-        // Ignore cache errors
-      }
+      } catch (error) {}
       return [];
     },
   );
@@ -466,9 +462,7 @@ export function RemindersSection({
           return cachedAllTasks;
         }
       }
-    } catch (error) {
-      // Ignore cache errors
-    }
+    } catch (error) {}
     return [];
   });
   const [cacheChecked, setCacheChecked] = useState(false);
@@ -493,7 +487,6 @@ export function RemindersSection({
     return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   }, []);
 
-  // Mark cache as checked after mount
   useEffect(() => {
     setCacheChecked(true);
   }, []);
@@ -562,9 +555,7 @@ export function RemindersSection({
               });
             }
           });
-        } catch (error) {
-          console.error("Failed to fetch memory titles:", error);
-        }
+        } catch (error) {}
       }
 
       const allTasks: Task[] = [];
@@ -691,14 +682,12 @@ export function RemindersSection({
         });
       }
 
-      // Merge new sections with existing ones if refreshing
       setCategorizedSections((prevSections) => {
         let finalSections: TaskSection[];
 
         if (isInitialLoad || prevSections.length === 0) {
           finalSections = sections;
         } else {
-          // Merge: prepend new tasks to existing sections
           const existingSectionMap = new Map(
             prevSections.map((s) => [s.key, s]),
           );
@@ -707,7 +696,6 @@ export function RemindersSection({
           sections.forEach((newSection) => {
             const existing = existingSectionMap.get(newSection.key);
             if (existing) {
-              // Merge groups, prepending new tasks
               const existingGroupMap = new Map<string, TaskGroup>(
                 existing.groups.map((g) => [g.memoryId || g.title || "", g]),
               );
@@ -717,7 +705,6 @@ export function RemindersSection({
                 const groupKey = newGroup.memoryId || newGroup.title || "";
                 const existingGroup = existingGroupMap.get(groupKey);
                 if (existingGroup) {
-                  // Merge tasks, prepending new ones
                   const existingTaskIds = new Set(
                     existingGroup.tasks.map((t) => t.id),
                   );
@@ -733,7 +720,6 @@ export function RemindersSection({
                 }
               });
 
-              // Add existing groups that weren't in new data
               existing.groups.forEach((existingGroup) => {
                 const groupKey =
                   existingGroup.memoryId || existingGroup.title || "";
@@ -755,7 +741,6 @@ export function RemindersSection({
             }
           });
 
-          // Add existing sections that weren't in new data
           prevSections.forEach((existingSection) => {
             if (!sections.some((s) => s.key === existingSection.key)) {
               mergedSections.push(existingSection);
@@ -767,7 +752,6 @@ export function RemindersSection({
 
         setAllTasksData(finalSections.flatMap((section) => section.groups));
 
-        // Update cache
         try {
           localStorage.setItem(
             "reminders_cache",
@@ -777,9 +761,7 @@ export function RemindersSection({
               timestamp: Date.now(),
             }),
           );
-        } catch (error) {
-          // Ignore cache errors
-        }
+        } catch (error) {}
 
         const allGroupKeys = new Set<string>();
         finalSections.forEach((section) => {
@@ -1201,8 +1183,7 @@ export function RemindersSection({
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
-        description:
-          "Your device does not support sharing. Copy the text instead.",
+        description: "Your device does not support sharing.",
         variant: "destructive",
       });
       return;
@@ -1260,8 +1241,7 @@ export function RemindersSection({
     if (!navigator.share) {
       toast({
         title: "Share unavailable",
-        description:
-          "Your device does not support sharing. Copy the text instead.",
+        description: "Your device does not support sharing.",
         variant: "destructive",
       });
       return;

@@ -228,7 +228,6 @@ export function AskNeoSection({
     }
   }, [toast]);
 
-  // Mark cache as checked after mount
   useEffect(() => {
     if (sessions.length > 0) {
       setCacheChecked(true);
@@ -245,7 +244,6 @@ export function AskNeoSection({
             setDynamicPrompts(prompts);
           })
           .catch((error: any) => {
-            console.error("Failed to load dynamic prompts:", error);
             setDynamicPrompts([]);
           })
           .finally(() => {

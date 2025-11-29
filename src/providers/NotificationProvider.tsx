@@ -57,6 +57,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const eventsRef = useRef<Record<string, CalendarEvent>>({});
   const timeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
   const triggeredRef = useRef<Set<string>>(new Set());
+  const hasRequestedNativePermissionRef = useRef(false);
 
   useEffect(() => {
     storage
@@ -107,6 +108,47 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           minutes === 1 ? "" : "s"
         }.`,
       });
+
+      try {
+        if (typeof window === "undefined" || typeof document === "undefined") {
+          return;
+        }
+        const NotificationCtor: typeof Notification | undefined =
+          window.Notification;
+        if (!NotificationCtor) return;
+
+        const isAppInBackground =
+          document.hidden === true || document.hasFocus() === false;
+
+        if (!isAppInBackground) {
+          return;
+        }
+
+        const showNative = () => {
+          const title = event.summary || "Upcoming event";
+          const body = `Starting in ${minutes} minute${
+            minutes === 1 ? "" : "s"
+          }`;
+
+          new NotificationCtor(title, {
+            body,
+          });
+        };
+
+        if (NotificationCtor.permission === "granted") {
+          showNative();
+        } else if (
+          NotificationCtor.permission === "default" &&
+          !hasRequestedNativePermissionRef.current
+        ) {
+          hasRequestedNativePermissionRef.current = true;
+          NotificationCtor.requestPermission().then((permission) => {
+            if (permission === "granted") {
+              showNative();
+            }
+          });
+        }
+      } catch {}
     },
     [toast],
   );

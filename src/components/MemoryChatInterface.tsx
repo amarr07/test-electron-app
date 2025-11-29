@@ -133,7 +133,6 @@ export function MemoryChatInterface({
         }
       }
     } catch (error: any) {
-      console.error("Failed to load existing chat:", error);
     } finally {
       setIsLoadingChat(false);
     }
@@ -260,51 +259,47 @@ export function MemoryChatInterface({
     cancelStreamRef.current?.();
     cancelStreamRef.current = null;
 
-    const userMessage: Message = {
-      id: `msg_${Date.now()}`,
-      role: "user",
-      content: trimmedPrompt,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
     setPrompt("");
     setIsStreaming(true);
 
     try {
       let chatId = currentChatId;
-      if (!chatId) {
-        if (!isLoadingChat && allowHistory && primaryMemoryId) {
-          try {
-            const result = await getMemoryChatIdAndMessages(primaryMemoryId);
-            if (result && result.chat_id) {
-              chatId = result.chat_id;
-              setCurrentChatId(chatId);
-              if (result.messages && result.messages.length > 0) {
-                const formattedMessages: Message[] = result.messages.map(
-                  (msg) => ({
-                    id: msg.id,
-                    role: msg.role,
-                    content: msg.content,
-                    sources: msg.sources,
-                  }),
-                );
-                setMessages(formattedMessages);
-              }
-            }
-          } catch (error) {
-            console.error(
-              "Failed to load existing chat, creating new one:",
-              error,
-            );
-          }
-        }
 
-        if (!chatId) {
-          const chatContextIds = allowHistory ? activeMemoryIds : [];
-          chatId = await createChatSession(chatContextIds);
-          setCurrentChatId(chatId);
-        }
+      if (!chatId && !isLoadingChat && allowHistory && primaryMemoryId) {
+        try {
+          const result = await getMemoryChatIdAndMessages(primaryMemoryId);
+          if (result && result.chat_id) {
+            chatId = result.chat_id;
+            setCurrentChatId(chatId);
+
+            if (result.messages && result.messages.length > 0) {
+              const formattedMessages: Message[] = result.messages.map(
+                (msg) => ({
+                  id: msg.id,
+                  role: msg.role,
+                  content: msg.content,
+                  sources: msg.sources,
+                }),
+              );
+              setMessages(formattedMessages);
+            }
+          }
+        } catch (error) {}
       }
+
+      if (!chatId) {
+        const chatContextIds = allowHistory ? activeMemoryIds : [];
+        chatId = await createChatSession(chatContextIds);
+        setCurrentChatId(chatId);
+      }
+
+      const userMessage: Message = {
+        id: `msg_${Date.now()}`,
+        role: "user",
+        content: trimmedPrompt,
+      };
+
+      setMessages((prev) => [...prev, userMessage]);
 
       const assistantMessage: Message = {
         id: `msg_${Date.now() + 1}`,
@@ -397,8 +392,6 @@ export function MemoryChatInterface({
     handleSend(promptText);
   };
 
-  // When a new initialQuestion is provided (e.g., from a Brainstorm card),
-  // open the chat and send it once as a quick prompt.
   useEffect(() => {
     const trimmed = initialQuestion?.trim();
     if (!trimmed) return;

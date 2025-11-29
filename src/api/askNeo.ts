@@ -173,15 +173,29 @@ export async function getMemoryChatIdAndMessages(
       return null;
     }
 
-    const formattedMessages: Array<{
+    type MessageWithTimestamp = {
       id: string;
       role: "user" | "assistant";
       content: string;
       sources?: MessageSource[];
-    }> = (result.messages || []).map((msg, idx) => {
+      createdAt: number;
+    };
+
+    const formattedMessages: MessageWithTimestamp[] = (
+      result.messages || []
+    ).map<MessageWithTimestamp>((msg, idx) => {
       const isUser =
         msg.IsUser !== undefined ? msg.IsUser : msg.role === "user";
       const text = msg.Text || msg.content || "";
+
+      let createdAt: number;
+      if (typeof msg.CreatedAt === "number") {
+        createdAt = msg.CreatedAt;
+      } else if (typeof msg.created_at === "number") {
+        createdAt = msg.created_at;
+      } else {
+        createdAt = idx;
+      }
 
       let sources: MessageSource[] | undefined;
       if (msg.Citations && typeof msg.Citations === "object") {
@@ -206,12 +220,37 @@ export async function getMemoryChatIdAndMessages(
         role,
         content: text,
         sources,
+        createdAt,
       };
     });
 
+    const hasProperTimestamps = formattedMessages.some(
+      (msg) => msg.createdAt > 100,
+    );
+
+    let sortedMessages = formattedMessages;
+
+    if (!hasProperTimestamps && formattedMessages.length > 1) {
+      const firstIsAssistant = formattedMessages[0].role === "assistant";
+      const secondIsUser =
+        formattedMessages.length > 1 && formattedMessages[1].role === "user";
+
+      if (firstIsAssistant && secondIsUser) {
+        sortedMessages = [...formattedMessages].reverse();
+      }
+    } else if (hasProperTimestamps) {
+      sortedMessages = [...formattedMessages].sort(
+        (a, b) => a.createdAt - b.createdAt,
+      );
+    }
+
+    const finalMessages = sortedMessages.map(
+      ({ createdAt: _ignored, ...rest }) => rest,
+    );
+
     return {
       chat_id: result.chat_id,
-      messages: formattedMessages,
+      messages: finalMessages,
     };
   } catch (error: any) {
     console.error("Error fetching memory chat ID and messages:", error);

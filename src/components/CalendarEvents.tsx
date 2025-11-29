@@ -31,14 +31,12 @@ export function CalendarEvents({
   externalRefreshToken,
   recorderStatus,
 }: CalendarEventsProps) {
-  // Initialize from cache synchronously to prevent empty state flash
   const [eventsByDate, setEventsByDate] = useState<CalendarEventsByDate[]>(
     () => {
       try {
         const cached = localStorage.getItem("calendar_events_cache");
         if (cached) {
           const { events: cachedEvents, timestamp } = JSON.parse(cached);
-          // Use cache if it's less than 5 minutes old
           if (
             Date.now() - timestamp < 5 * 60 * 1000 &&
             cachedEvents.length > 0
@@ -46,9 +44,7 @@ export function CalendarEvents({
             return cachedEvents;
           }
         }
-      } catch (error) {
-        // Ignore cache errors
-      }
+      } catch (error) {}
       return [];
     },
   );
@@ -59,6 +55,7 @@ export function CalendarEvents({
   const [cacheChecked, setCacheChecked] = useState(false);
   const [connectingCalendar, setConnectingCalendar] = useState(false);
   const [needsCalendarConnection, setNeedsCalendarConnection] = useState(false);
+  const hasLoadedOnceRef = useRef(false);
   const { toast } = useToast();
   const { registerEvents } = useNotifications();
   const timerStartTimeRef = useRef<number | null>(null);
@@ -123,7 +120,6 @@ export function CalendarEvents({
     [getManuallyStoppedEvents],
   );
 
-  // Mark cache as checked after mount
   useEffect(() => {
     setCacheChecked(true);
   }, []);
@@ -215,6 +211,7 @@ export function CalendarEvents({
   /**
    * Loads calendar events and registers them for notifications.
    * Skips polling entirely when Google Calendar is not connected.
+   * On initial load, replaces events. On refresh, replaces with fresh data.
    */
   const loadEvents = useCallback(async () => {
     const token = await storage.getGoogleAccessToken();
@@ -227,82 +224,43 @@ export function CalendarEvents({
       return;
     }
 
-    setLoading(true);
+    const isBackgroundRefresh = hasLoadedOnceRef.current;
+    if (!isBackgroundRefresh) {
+      setLoading(true);
+    }
+    onLoadingChange?.(true);
+
     setError(null);
     setNeedsCalendarConnection(false);
-    onLoadingChange?.(true);
+
     try {
       const events = await calendarService.getEvents();
       registerEvents(events || []);
       const grouped = calendarService.groupEventsByDate(events || []);
 
-      // Merge new events with existing ones if refreshing
-      setEventsByDate((prevEvents) => {
-        if (isInitialLoad || prevEvents.length === 0) {
-          const finalEvents = grouped;
-          // Update cache
-          try {
-            localStorage.setItem(
-              "calendar_events_cache",
-              JSON.stringify({
-                events: finalEvents,
-                timestamp: Date.now(),
-              }),
-            );
-          } catch (error) {
-            // Ignore cache errors
-          }
-          setIsInitialLoad(false);
-          return finalEvents;
-        }
-
-        // Merge: combine events by date, prepending new ones
-        const existingDateMap = new Map(prevEvents.map((e) => [e.date, e]));
-        const merged: CalendarEventsByDate[] = [];
-
-        grouped.forEach((newGroup) => {
-          const existing = existingDateMap.get(newGroup.date);
-          if (existing) {
-            // Merge events, prepending new ones
-            const existingEventIds = new Set(existing.events.map((e) => e.id));
-            const newEvents = newGroup.events.filter(
-              (e) => !existingEventIds.has(e.id),
-            );
-            merged.push({
-              ...existing,
-              events: [...newEvents, ...existing.events],
-            });
-          } else {
-            merged.push(newGroup);
-          }
-        });
-
-        // Add existing dates that weren't in new data
-        prevEvents.forEach((existingGroup) => {
-          if (!grouped.some((g) => g.date === existingGroup.date)) {
-            merged.push(existingGroup);
-          }
-        });
-
-        // Update cache
+      setEventsByDate(() => {
+        const finalEvents = grouped;
         try {
           localStorage.setItem(
             "calendar_events_cache",
             JSON.stringify({
-              events: merged,
+              events: finalEvents,
               timestamp: Date.now(),
             }),
           );
-        } catch (error) {
-          // Ignore cache errors
-        }
-
-        setIsInitialLoad(false);
-        return merged;
+        } catch (error) {}
+        return finalEvents;
       });
+
+      if (!hasLoadedOnceRef.current) {
+        setIsInitialLoad(false);
+        hasLoadedOnceRef.current = true;
+      }
     } catch (err: any) {
       const message = err?.message || "Unable to load calendar events.";
-      setEventsByDate([]);
+      if (!hasLoadedOnceRef.current) {
+        setEventsByDate([]);
+      }
       setError(message);
       toast({
         title: "Unable to sync calendar",
@@ -313,7 +271,7 @@ export function CalendarEvents({
       setLoading(false);
       onLoadingChange?.(false);
     }
-  }, [onLoadingChange, registerEvents, toast, isInitialLoad]);
+  }, [onLoadingChange, registerEvents, toast]);
 
   useEffect(() => {
     loadEvents();
@@ -557,8 +515,6 @@ export function CalendarEvents({
     return { month, day };
   };
 
-  // Removed loader - always show content if available
-
   const needsCalendarPermission =
     error &&
     (error.includes("Calendar access requires") ||
@@ -571,7 +527,6 @@ export function CalendarEvents({
   const handleConnectCalendar = async () => {
     try {
       setConnectingCalendar(true);
-      // Use connectGoogleCalendar instead of signInWithGoogle to avoid overwriting user profile
       await authManager.connectGoogleCalendar();
       toast({
         title: "Google Calendar connected",
@@ -676,7 +631,6 @@ export function CalendarEvents({
     );
   }
 
-  // Only show empty state after cache has been checked to prevent flash
   if (cacheChecked && filteredEvents.length === 0) {
     return (
       <div className="flex h-full min-h-[16rem] items-center justify-center">

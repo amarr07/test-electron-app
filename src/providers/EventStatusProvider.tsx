@@ -37,8 +37,8 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
   const [memoryRefreshVersion, setMemoryRefreshVersion] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const transcribingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  // Track processed event IDs to prevent duplicate toasts
   const processedEventIdsRef = useRef<Set<string>>(new Set());
+  const wasProcessingRef = useRef<boolean>(false);
 
   const clearTranscribingTimeout = useCallback(() => {
     if (transcribingTimeoutRef.current) {
@@ -70,6 +70,7 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
 
   const enableProcessing = useCallback(() => {
     setIsMemoryProcessing(true);
+    wasProcessingRef.current = true;
     clearProcessingTimeout();
     processingTimeoutRef.current = setTimeout(() => {
       setIsMemoryProcessing(false);
@@ -84,14 +85,11 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
 
   const handleEvent = useCallback(
     (event: UserEventRecord) => {
-      // Check if we've already processed this event to prevent duplicate toasts
       const eventKey = `${event.id}-${event.event}`;
       const shouldShowToast = !processedEventIdsRef.current.has(eventKey);
 
-      // Mark event as processed
       processedEventIdsRef.current.add(eventKey);
 
-      // Clean up old processed IDs (keep only last 100 to prevent memory leak)
       if (processedEventIdsRef.current.size > 100) {
         const idsArray = Array.from(processedEventIdsRef.current);
         processedEventIdsRef.current = new Set(idsArray.slice(-50));
@@ -116,11 +114,12 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "completed": {
+          const wasProcessing = wasProcessingRef.current;
+          wasProcessingRef.current = false;
           disableProcessing();
           disableTranscribing();
           setMemoryRefreshVersion((version) => version + 1);
-          // Only show toast if we haven't processed this event before
-          if (shouldShowToast) {
+          if (shouldShowToast && wasProcessing) {
             toast({
               title: "Memory created",
               description: "We're updating your timeline.",
@@ -129,11 +128,12 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "post_completed": {
+          const wasProcessing = wasProcessingRef.current;
+          wasProcessingRef.current = false;
           disableProcessing();
           disableTranscribing();
           setMemoryRefreshVersion((version) => version + 1);
-          // Only show toast if we haven't processed this event before
-          if (shouldShowToast) {
+          if (shouldShowToast && wasProcessing) {
             toast({
               title: "Memory updated",
               description: "Enhancements are ready.",
@@ -142,9 +142,9 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "failed": {
+          wasProcessingRef.current = false;
           disableProcessing();
           disableTranscribing();
-          // Only show toast if we haven't processed this event before
           if (shouldShowToast) {
             toast({
               title: "Memory processing failed",
@@ -157,7 +157,6 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
         default: {
           if (event.event.includes("archived")) {
             setMemoryRefreshVersion((version) => version + 1);
-            // Only show toast if we haven't processed this event before
             if (shouldShowToast) {
               toast({
                 title: "Memory archived",
@@ -186,16 +185,6 @@ export function EventStatusProvider({ children }: { children: ReactNode }) {
 
     const unsubscribe = subscribeToUserEvents(user.uid, (events) => {
       events.forEach(handleEvent);
-      if (events.length > 0) {
-        events.forEach((event) => {
-          console.log("[EventStatusProvider] Firestore event", {
-            id: event.id,
-            event: event.event,
-            memoryId: event.memoryId,
-            updatedAt: event.updatedAt.toISOString(),
-          });
-        });
-      }
     });
 
     return () => {
