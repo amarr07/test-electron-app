@@ -26,6 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Get version from package.json
+        id: package-version
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          echo "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Build Windows installer
         run: npm run build:win
 
@@ -43,21 +50,12 @@ jobs:
             exit 1
           }
 
-      - name: Upload Windows installer to Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v5
         with:
-          files: ${{ steps.find-exe.outputs.file }}
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
-          body: |
-            Automated build from commit ${{ github.sha }}
-
-            **Downloads:**
-            - Windows: ${{ steps.find-exe.outputs.name }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: windows-installer
+          path: ${{ steps.find-exe.outputs.file }}
+          retention-days: 1
 
   build-macos:
     name: Build macOS
@@ -78,6 +76,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Get version from package.json
+        id: package-version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
       - name: Build macOS DMG
         run: npm run build:mac
 
@@ -93,16 +98,70 @@ jobs:
           echo "file=$DMG" >> $GITHUB_OUTPUT
           echo "name=$(basename "$DMG")" >> $GITHUB_OUTPUT
 
-      - name: Upload macOS DMG to Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v5
         with:
-          files: ${{ steps.find-dmg.outputs.file }}
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
+          name: macos-installer
+          path: ${{ steps.find-dmg.outputs.file }}
+          retention-days: 1
+
+  publish-release:
+    name: Publish Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Get version from package.json
+        id: package-version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v5
+        with:
+          name: windows-installer
+          path: ./artifacts
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v5
+        with:
+          name: macos-installer
+          path: ./artifacts
+
+      - name: Get file names
+        id: files
+        run: |
+          EXE=$(find ./artifacts -name "*.exe" -type f | head -n 1)
+          DMG=$(find ./artifacts -name "*.dmg" -type f | head -n 1)
+          echo "exe=$EXE" >> $GITHUB_OUTPUT
+          echo "dmg=$DMG" >> $GITHUB_OUTPUT
+          echo "exe_name=$(basename "$EXE")" >> $GITHUB_OUTPUT
+          echo "dmg_name=$(basename "$DMG")" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.files.outputs.exe }}
+            ${{ steps.files.outputs.dmg }}
+          tag_name: ${{ steps.package-version.outputs.tag }}
+          name: NeoSapien ${{ steps.package-version.outputs.tag }}
           body: |
+            ## NeoSapien ${{ steps.package-version.outputs.tag }}
+
             Automated build from commit ${{ github.sha }}
 
             **Downloads:**
-            - macOS: ${{ steps.find-dmg.outputs.name }}
+            - Windows: ${{ steps.files.outputs.exe_name }}
+            - macOS: ${{ steps.files.outputs.dmg_name }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
