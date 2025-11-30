@@ -1,0 +1,108 @@
+name: Build and Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run build:win
+
+      - name: Find Windows installer
+        id: find-exe
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "release" -Filter "*.exe" | Select-Object -First 1
+          if ($exe) {
+            Write-Host "Found installer: $($exe.Name)"
+            echo "file=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            echo "name=$($exe.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Host "No .exe file found in release directory"
+            exit 1
+          }
+
+      - name: Upload Windows installer to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.find-exe.outputs.file }}
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            **Downloads:**
+            - Windows: ${{ steps.find-exe.outputs.name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS DMG
+        run: npm run build:mac
+
+      - name: Find macOS DMG
+        id: find-dmg
+        run: |
+          DMG=$(find release -name "*.dmg" -type f | head -n 1)
+          if [ -z "$DMG" ]; then
+            echo "No .dmg file found in release directory"
+            exit 1
+          fi
+          echo "Found DMG: $DMG"
+          echo "file=$DMG" >> $GITHUB_OUTPUT
+          echo "name=$(basename "$DMG")" >> $GITHUB_OUTPUT
+
+      - name: Upload macOS DMG to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.find-dmg.outputs.file }}
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            **Downloads:**
+            - macOS: ${{ steps.find-dmg.outputs.name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
