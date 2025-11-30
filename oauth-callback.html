@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Authentication Success</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        h1 {
+            margin: 0 0 20px 0;
+            font-size: 28px;
+        }
+        p {
+            margin: 0;
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        .spinner {
+            margin: 20px auto;
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✓ Authentication Successful</h1>
+        <div class="spinner"></div>
+        <p>Completing sign-in...</p>
+    </div>
+
+    <script>
+        // This script extracts OAuth tokens from the URL and sends them back to the main window
+        (function() {
+            try {
+                // Get the full URL including hash fragment
+                const fullUrl = window.location.href;
+                
+                console.log('OAuth callback received:', fullUrl);
+                
+                // Extract tokens from URL hash (implicit flow)
+                const hash = window.location.hash.substring(1);
+                const params = new URLSearchParams(hash);
+                
+                const idToken = params.get('id_token');
+                const accessToken = params.get('access_token');
+                const error = params.get('error');
+                
+                if (error) {
+                    console.error('OAuth error:', error, params.get('error_description'));
+                }
+                
+                if (idToken || accessToken) {
+                    console.log('Tokens found - id_token:', !!idToken, 'access_token:', !!accessToken);
+                }
+                
+                // The window will be detected and closed by the main process
+                // which monitors for navigation to this page
+            } catch (e) {
+                console.error('Error in callback page:', e);
+            }
+        })();
+    </script>
+</body>
+</html>

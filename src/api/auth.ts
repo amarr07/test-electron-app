@@ -258,25 +258,39 @@ class AuthManager {
       });
 
       // Parse tokens from callback URL
-      // For implicit flow, tokens are always in the URL fragment (#)
+      // For implicit flow, tokens are in the URL fragment (#)
+      // For redirect/query flow, tokens are in query params
       let idToken: string | null = null;
       let accessToken: string | null = null;
 
+      console.log("OAuth callback URL:", result.url);
+
+      // Try extracting from URL fragment first (implicit flow)
       if (result.url.includes("#")) {
-        const hashParams = new URLSearchParams(result.url.split("#")[1]);
-        idToken = hashParams.get("id_token");
-        accessToken = hashParams.get("access_token");
+        const fragmentPart = result.url.split("#")[1];
+        if (fragmentPart) {
+          const hashParams = new URLSearchParams(fragmentPart);
+          idToken = hashParams.get("id_token");
+          accessToken = hashParams.get("access_token");
+          console.log("Extracted from hash - id_token:", !!idToken, "access_token:", !!accessToken);
+        }
       }
 
-      // Also check query params as fallback (in case callback URL was modified)
+      // Also check query params as fallback
       if (!idToken) {
-        const urlObj = new URL(result.url);
-        idToken = urlObj.searchParams.get("id_token");
-        accessToken = urlObj.searchParams.get("access_token");
+        try {
+          const urlObj = new URL(result.url);
+          idToken = urlObj.searchParams.get("id_token");
+          accessToken = urlObj.searchParams.get("access_token");
+          console.log("Extracted from query - id_token:", !!idToken, "access_token:", !!accessToken);
+        } catch (e) {
+          console.error("Error parsing URL:", e);
+        }
       }
 
       if (!idToken) {
-        throw new Error("No ID token received from Google");
+        console.error("No ID token found in URL:", result.url);
+        throw new Error("No ID token received from Google. Please try again.");
       }
 
       // Sign in to Firebase with Google credential

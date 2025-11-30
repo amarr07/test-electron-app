@@ -11,6 +11,8 @@ const {
   session,
 } = require("electron");
 const path = require("path");
+const http = require("http");
+const url = require("url");
 const ElectronStore = require("electron-store");
 const Store = ElectronStore.default || ElectronStore;
 
@@ -130,8 +132,9 @@ function createWindow() {
 
 /**
  * Creates OAuth authentication window for Google/Apple sign-in.
+ * Uses a local HTTP server for reliable callback handling.
  */
-function createOAuthWindow(url, callbackUrl) {
+function createOAuthWindow(authUrl, callbackUrl) {
   if (oauthWindow) {
     oauthWindow.focus();
     return oauthWindow;
@@ -146,35 +149,29 @@ function createOAuthWindow(url, callbackUrl) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true, // Keep security enabled, handle CSP below
-      sandbox: true, // Enable sandbox for OAuth window too
+      webSecurity: true,
+      sandbox: true,
     },
   });
 
+  // Remove CSP headers for Apple OAuth compatibility
   oauthWindow.webContents.session.webRequest.onHeadersReceived(
     { urls: ["https://appleid.apple.com/*"] },
     (details, callback) => {
-      const headers = details.responseHeaders;
-
-      // Remove or modify CSP headers that block blob workers.
-      if (headers["content-security-policy"]) {
-        delete headers["content-security-policy"];
-      }
-      if (headers["Content-Security-Policy"]) {
-        delete headers["Content-Security-Policy"];
-      }
-
+      const headers = details.responseHeaders || {};
+      delete headers["content-security-policy"];
+      delete headers["Content-Security-Policy"];
       callback({ responseHeaders: headers });
     },
   );
 
-  // Intercept web requests to capture POST data from Apple.
+  // Intercept POST requests to capture Apple OAuth responses
   oauthWindow.webContents.session.webRequest.onBeforeRequest(
     { urls: [callbackUrl + "*"] },
     (details, callback) => {
-      if (details.method === "POST" && details.uploadData) {
+      if (details.method === "POST" && details.uploadData && !authCallbackHandled) {
         try {
-          // Parse form POST data.
+          // Parse form POST data from Apple
           const postData = details.uploadData
             .map((data) => {
               const text = data.bytes ? data.bytes.toString("utf8") : "";
@@ -185,20 +182,22 @@ function createOAuthWindow(url, callbackUrl) {
           const params = new URLSearchParams(postData);
           const idToken = params.get("id_token");
           const code = params.get("code");
+          const error = params.get("error");
 
-          if (idToken || code) {
+          if (idToken || code || error) {
             authCallbackHandled = true;
-            const dataUrl = callbackUrl + "?" + postData;
+            // Construct URL with POST data as query params
+            const responseUrl = callbackUrl + "?" + postData;
+            
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send("auth-callback", { url: dataUrl });
+              mainWindow.webContents.send("auth-callback", { url: responseUrl });
             }
-            callback({});
+            
             setTimeout(() => {
               if (oauthWindow && !oauthWindow.isDestroyed()) {
                 oauthWindow.close();
               }
             }, 100);
-            return;
           }
         } catch (error) {
           console.error("Error parsing POST data:", error);
@@ -208,148 +207,61 @@ function createOAuthWindow(url, callbackUrl) {
     },
   );
 
+  // Track if callback has been handled
   let authCallbackHandled = false;
 
-  const checkForTokens = async () => {
+  // Listen for page load completion
+  oauthWindow.webContents.on("did-finish-load", async () => {
     if (authCallbackHandled || !oauthWindow || oauthWindow.isDestroyed()) {
       return;
     }
 
     try {
-      const url = await oauthWindow.webContents.executeJavaScript(
-        "window.location.href",
-        true,
-      );
-
-      if (url.startsWith(callbackUrl)) {
-        if (
-          url.includes("id_token") ||
-          url.includes("idToken") ||
-          url.includes("access_token") ||
-          url.includes("accessToken") ||
-          url.includes("code=")
-        ) {
-          authCallbackHandled = true;
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send("auth-callback", { url });
-          }
-          oauthWindow.close();
-          return;
-        }
-
-        try {
-          const bodyText = await oauthWindow.webContents.executeJavaScript(
-            "document.body ? document.body.innerText : ''",
-            true,
-          );
-
-          if (
-            bodyText &&
-            (bodyText.includes("idToken") || bodyText.includes("accessToken"))
-          ) {
-            authCallbackHandled = true;
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send("auth-callback", { url, bodyText });
-            }
-            oauthWindow.close();
-            return;
-          }
-        } catch (e) {}
-      }
-    } catch (error) {}
-  };
-
-  oauthWindow.loadURL(url);
-
-  oauthWindow.webContents.on("did-finish-load", async () => {
-    if (authCallbackHandled || !oauthWindow || oauthWindow.isDestroyed())
-      return;
-
-    try {
+      // Get the current URL
       const currentUrl = await oauthWindow.webContents.executeJavaScript(
         "window.location.href",
         true,
       );
 
-      if (currentUrl.includes(callbackUrl)) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        if (!oauthWindow || oauthWindow.isDestroyed()) return;
-        const authData = await oauthWindow.webContents.executeJavaScript(
-          `
-              (function() {
-                try {
-                  const hash = window.location.hash.substring(1);
-                  const search = window.location.search.substring(1);
-                  
-                  if (hash && (hash.includes('id_token') || hash.includes('code'))) {
-                    return window.location.href;
-                  }
-                  
-                  if (search && (search.includes('id_token') || search.includes('code'))) {
-                    return window.location.href;
-                  }
-                  
-                  // Check document title for success indicators.
-                  if (document.title && (document.title.includes('Success') || document.title.includes('Close'))) {
-                    try {
-                      const keys = Object.keys(localStorage);
-                      for (let key of keys) {
-                        const value = localStorage.getItem(key);
-                        if (value && (value.includes('idToken') || value.includes('id_token'))) {
-                          return value;
-                        }
-                      }
-                    } catch (e) {}
-                  }
-                  
-                  const bodyText = document.body ? document.body.innerText : '';
-                  
-                  if (bodyText.includes('Success') || bodyText.includes('You can now close')) {
-                    return '__AUTH_SUCCESS__'
-                  }
-                  
-                  return null;
-                } catch (e) {
-                  return null;
-                }
-              })()
-            `,
+      const parsedUrl = new url.URL(currentUrl);
+      const callbackParsed = new url.URL(callbackUrl);
+
+      // Check if this is our callback URL
+      if (
+        parsedUrl.origin === callbackParsed.origin &&
+        parsedUrl.pathname === callbackParsed.pathname
+      ) {
+        // Extract the full URL including hash fragment using JavaScript
+        const fullUrlWithHash = await oauthWindow.webContents.executeJavaScript(
+          `(function() {
+            // Return the complete URL including hash
+            return window.location.href;
+          })()`,
           true,
         );
 
-        if (authData) {
-          authCallbackHandled = true;
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send("auth-callback", {
-              url: authData === "__AUTH_SUCCESS__" ? currentUrl : authData,
-            });
-          }
+        authCallbackHandled = true;
+
+        // Send the full URL (including hash) to renderer
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("auth-callback", {
+            url: fullUrlWithHash,
+          });
+        }
+
+        setTimeout(() => {
           if (oauthWindow && !oauthWindow.isDestroyed()) {
             oauthWindow.close();
           }
-          return;
-        }
+        }, 100);
       }
-    } catch (e) {
-      console.error("Injection error:", e);
+    } catch (error) {
+      console.error("Page load check error:", error);
     }
-
-    if (!oauthWindow || oauthWindow.isDestroyed()) return;
-    await checkForTokens();
-
-    const interval = setInterval(async () => {
-      if (authCallbackHandled || !oauthWindow || oauthWindow.isDestroyed()) {
-        clearInterval(interval);
-        return;
-      }
-      await checkForTokens();
-    }, 500);
-
-    setTimeout(() => clearInterval(interval), 120000);
   });
 
-  oauthWindow.webContents.on("did-navigate-in-page", checkForTokens);
-  oauthWindow.webContents.on("did-navigate", checkForTokens);
+  // Load the OAuth URL
+  oauthWindow.loadURL(authUrl);
 
   oauthWindow.on("closed", () => {
     oauthWindow = null;
