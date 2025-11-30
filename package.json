@@ -26,6 +26,7 @@
   "build": {
     "appId": "com.neosapien.app",
     "productName": "NeoSapien",
+    "publish": null,
     "files": [
       "dist/**/*",
       "main.js",
